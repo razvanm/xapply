@@ -1,0 +1,535 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html><head>
+<title>An introduction to ptbw</title>
+<link rel="stylesheet" type="text/css" href="/msrc/css/code.css"/>
+</head><body>
+<h1>What you need to know to understand this document</h1>
+
+This document assumes you are quite familiar with the
+standard UNIX process model
+and the shell <code class="sh">sh</code>(1).
+In addition you should have a working understanding of the
+<a href="../../bin/xapply/xapply.html"><code class="sh">xapply</code></a>(1)
+wrapper.
+
+<h1>What is <code class="sh">ptbw</code>?</h1>
+
+The <code class="sh">ptbw</code> <a href="../../bin/wrapw/wrapper.html">wrapper</a> is a governor for
+large parallel tasks.
+Without a limiter many parallel processes would consume more
+resources than the underlying system can provide.
+This conflict may "thrash" the node, starve it for resources, or
+cause competing tasks to double allocate an asset.
+
+<p>
+<code class="sh">Ptbw</code> provides cooperating processes a pool of
+resources in a structure that allows them to be locked and
+released very quickly.
+A managing instance of <code class="sh">ptbw</code> controls the free pool,
+each client instance allocates from that pool on behalf of a
+<code class="param">client</code> process.
+When a <code class="param">client</code> process
+<code class="libc">exit</code>s the resources are returned to
+the free poll.
+
+<h2>Wrapper mode</h2>
+
+Because <code class="sh">ptbw</code> is a wrapper it has two modes: the
+manager and client.
+See the <A href="/cgi-bin/manpage.cgi?ptbw">ptbw manual page</A> for
+more details on these modes.
+
+In manager mode, under the <code class="opt">-m</code> option,
+<code class="sh">ptbw</code> starts a process in
+an environment that allows it to
+allocate resources from a pool.
+That process (given as <code class="param">utility</code> below)
+usually starts parallel tasks which allocate elements from the
+pool to do work.
+That usage looks like:
+<blockquote>
+ptbw
+<code class="opt">-m</code>
+[<code class="opt">-dqQ</code>]
+[<code class="opt">-</code><code class="param">depth</code>]
+[<code class="opt">-J</code> <code class="param">jobs</code>]
+[<code class="opt">-N</code> <code class="param">path</code>]
+[<code class="opt">-R</code> <code class="param">req</code>]
+[<code class="opt">-t</code> <code class="param">tags</code>]
+[<code class="param">utility</code>]
+</blockquote>
+
+<P>
+Then each <code class="param">client</code> process started
+directly or indirectly by <code class="param">utility</code>
+requests resources from the pool then executes with an
+environment variable, named <code class="sh">ptbw_list</code>, set to
+indicate while elements of the pool were bound for that
+task.
+That usage looks like:
+<blockquote>
+ptbw
+[<code class="opt">-AqQ</code>]
+[<code class="opt">-</code><code class="param">depth</code>]
+[<code class="opt">-R</code>&nbsp;<code class="param">req</code>]
+[<code class="opt">-t</code>&nbsp;<code class="param">tags</code>]
+[<code class="param">client</code>]
+</blockquote>
+
+<h2>As an example</h2>
+
+Physical resources are a good first example, for instance an out-bound modem.
+Modems are a fixed asset, as they are
+each connected to a telephone line.  There are a fixed number of modems
+connected to a server, so a process that needs access to a modem must
+lock that modem to insure that another process is not presently
+engaging it.
+
+<p>
+Assume there are 3 modems connected to our server, and that we need to
+dial 150 hosts to gather some data from each.
+The usual method to split the work would evenly divide
+the hosts to create a list of 50 hosts for each dialer process.  By doing
+that we are assuming that each data recovery task takes the same amount
+of time.
+<p>
+Another way would be to start 150 processes and spin-lock for a modem in
+each.  That's exactly how some of the low-level UNIX kernel events work,
+which is fine for a small set of threads spinning for a diverse resource
+pool -- not so much for user-level tasks that should be better coordinated.
+<p>
+The method implemented by <code class="sh">ptbw</code> wraps an environment in
+which access to a modem is granted to a tree for the life of
+the root process in that tree.  As modems become available a
+process is fork'd bound to that resource, as each task finishes
+it exits to return the modem to the pool.
+
+<p>
+Of course a "modem" could represent any virtural or physical resource.
+
+<h2>The master interface</h2>
+
+The resource manager is the master in the wrapper model.  This process
+services clients as they request access to tokens from the resource pool,
+provides notification of available resources to blocked clients, and
+waits for the <code class="param">utility</code> process to exit.
+
+<p id="opt-N">
+Normally clients use the diversion stack managed in
+the environment to connect to the
+tightest enclosing master instance.
+But in the case of <code class="sh">ptbw</code>
+it is sometimes more effective to
+have a "global" instance rooted at a well-known socket to
+manage system-wide pools.  In that case the global instance
+sets the desired socket name with
+<code class="opt">-N</code> <code class="param">path</code>.
+This allows disparate clients to cooperate via the "fixed"
+address of the global instance.
+
+<p>
+The <code class="param">path</code> selected is only really fixed by
+a site (or application) policy, not something you need to
+get consensus on across the IETF, or even across the street.
+
+<p id="opt-t">
+Any master instance must draw the list of tokens from someplace.
+The non-comment lines from the <code class="param">tags</code> file
+specified under <code class="opt">-t</code> form the resource
+pool for most instances.  This allows comments for revision control
+markup to be included in the file.
+For example a <code class="param">tags</code> file describing
+our three working modems might look like:
+<blockquote class="file"><pre><code ># $<!-- -->Source: <i>revision control path...</i>
+/dev/cua01
+/dev/cua02
+#/dev/cua03
+/dev/cua04</code></pre></blockquote>
+The two commented lines help keep track of the authoritive data source,
+and the fact that modem 3 is out of service.
+But the reason why modem 3 is out of service is in the
+revision log of the file, not in the file itself.
+<code class="sh">Hxmd</code> configuration files accept comments
+for the same reason.
+
+<p id="master1">
+Feel free to copy that file to "example.list", being careful to trim
+any blanks on the end of the lines.
+To turn that file into a running instance of <code class="sh">ptbw</code>
+one might execute:
+<blockquote class="file"><pre><code >ptbw -m -t example.list ${SHELL} -i</code></pre></blockquote>
+
+<p>
+By using the shell as the <code class="param">utility</code> we can explore the
+wrapper environment we've created.  Try a few commands from within
+that shell, for starters the normal version option:
+<blockquote class="file"><pre><code >ptbw -V</code></pre></blockquote>
+Note that there is an additional line at the end of the output
+that shows the active diversion and the fact that it is the
+default target:
+<blockquote class="file"><pre><code >ptbw:  1: /tmp/ptbdPbdWRT/sta0 [target]</code></pre></blockquote>
+
+<p>
+Now we can ask for the whole tableau:
+<blockquote class="file"><pre><code >ptbw</code></pre></blockquote>
+Which outputs:
+<blockquote class="file"><pre><code >ptbw: master has 3 tokens, max length 10 (total space 33)
+ Master tokens from file: example.list
+ Index  Lock    Tokens (request in groups of 1)
+     0  0       /dev/cua01
+     1  0       /dev/cua02
+     2  0       /dev/cua04</code></pre></blockquote>
+
+<p>
+If we were to lock a token with the client program, then look at the
+tableau before the process releases the lock:
+<blockquote class="file"><pre><code >ptbw sleep 1024 &amp;
+ptbw</code></pre></blockquote>
+We could even see the process-id of
+the <code class="sh">ptbw</code> instance with the lock.
+You can use that process-id to shoot your own processes, but don't
+believe it if you are the superuser.  In fact I almost never run
+a <code class="sh">ptbw</code> as root, there is no reason to.
+
+<p>
+Either foreground and terminate the sleepers, or kill them by pid
+before you move on.
+
+<p>
+The <code class="param">tags</code> file may also be the name
+of a master instance's socket.  In that case the new master allocates
+resources from the (now) enclosing master, manages them, then returns
+them to the spcified master instance.  That is one way a "global"
+master might be leveraged to share resources amongst unrelated
+tasks.  The <code class="param">tags</code> filename "-" is
+a synonym for the tightest diversion's socket name.
+
+<P>
+Still under the <code class="sh">ptbw</code> from above.  We can
+start another master instance inside the first, just run:
+<blockquote class="file"><pre><code >PS1="below " ptbw -m -J2 -R1 -t - ${SHELL} -i</code></pre></blockquote>
+then run the same test you run above.  Now the version output shows
+two enclosing diversions, and the tableau has only 2 lines.
+
+<P>
+If you exit the "below" shell and start another, then look in
+the tableau output you might notice that the tokens the nested
+instance has to manage changed.  By default <code class="sh">ptbw</code>
+rolls though the tokens, it doesn't always give out the first available.
+
+<P>
+Feel free to exit those master shells.
+
+<p id="opt-R">
+Clients can allocate as many resources as they wish, but can only
+ask for <code class="param">req</code> of them in an atomic transaction.
+Any request for more than that many tokens might be processed as
+more than one allocation.  This gives competing processes as chance to
+"get in the game" before the big dog consumes all the choice tokens.
+The <code class="opt">-R</code> specification to the master should be
+tuned to match the clients minimal needs.  A value of 1 is usually
+a good default, or don't specify any.
+
+<p id="opt-J">
+When constrained by a <code class="param">tags</code> the
+<code class="param">jobs</code> specification has little effect:
+we can't add more tokens to the resource pool just because the command-line
+asked for more.  But in cases where we are drawing from an enclosing
+instance or creating a list, we can use <code class="opt">-J</code>
+and <code class="opt">-R</code> to specify how many tokens to allocate
+for maximum through-put.
+
+<p>
+For example to display a tableau with an allocation of 20 integers
+and an atomic allocation limit of 4 at a time:
+<blockquote class="file"><pre><code >ptbw -m -J5 -R4 -- ptbw</code></pre></blockquote>
+Which outputs a tableau which looks like:
+<blockquote class="file"><pre><code >ptbw: master has 20 tokens, max length 2 (total space 50)
+ Master tokens from the internal function: iota
+ Index	Lock	Tokens (request in groups of 4)
+     0	0	0
+     1	0	1
+     2	0	2
+     3	0	3
+     4	0	4
+     5	0	5
+     6	0	6
+     7	0	7
+     8	0	8
+     9	0	9
+    10	0	10
+    11	0	11
+    12	0	12
+    13	0	13
+    14	0	14
+    15	0	15
+    16	0	16
+    17	0	17
+    18	0	18
+    19	0	19</code></pre></blockquote>
+
+<p>
+That same command, when passed a <code class="opt">-t</code> option with
+a file that holds fewer than 20 tokens, produces an error like:
+<blockquote class="file"><pre><code >ptbw: token count 11 less than suggested (20)</code></pre></blockquote>
+This error can be suppressed with <code class="opt">-q</code>.
+
+
+<h2 id="client">The client interface</h2>
+
+<p id="tableau">
+In the example above we used <code class="sh">ptbw</code> as the
+<code class="param">client</code> to output the tableau.  That is the
+default behavior when no client shell command is specified on the
+command-line.
+
+<p id="ptbw_list">
+When a shell command is executed from a client instance of
+<code class="sh">ptbw</code> it may accept the tokens allocated on its
+behalf in two ways.  Either as an environment variable, or
+as positional parameters to <code class="param">client</code>.
+
+<P>
+By default the environment variable <code class="env">ptbw_list</code>
+holds the recovered values (separated with newlines).  He is an example
+of a client that just calls <code class="sh">echo</code>:
+<blockquote class="file"><pre><code >ptbw -R2 sh -c 'echo $ptbw_list'</code></pre></blockquote>
+Run from a shell that should output:
+<blockquote class="file"><pre><code >ptbw: no enclosing diversion</code></pre></blockquote>
+
+<p id="opt-V">
+To make an enclosing diversion you need to start another shell wrapped in
+a <code class="sh">ptbw</code>:
+<blockquote class="file"><pre><code >ptbw -m -R2 -J3 $SHELL -i</code></pre></blockquote>
+In that shell I might set the prompt to indicate that it is not your
+login shell, for example set <code class="env">PS1</code> to some unique
+string.  You can check to see if you are in such as above.
+<p>
+In that output notice the line with the "[target]" tag on the end, that
+is the current selected diversion.
+When there is no diversion in the list, there are no enclosing diversions.
+All wrappers should have about that same display in the version output, for
+example see
+<A href="../xclate/xclate.html"><code class="sh">xclate</code></A>.
+
+<p>
+From within that shell retry the <code class="sh">echo</code> client:
+<blockquote class="file"><pre><code >ptbw -R2 sh -c 'echo $ptbw_list'</code></pre></blockquote>
+Run from a shell that should output:
+<code class="file">0 1</code> then
+<code class="file">2 3</code> then
+<code class="file">4 5</code> then repeat that sequence as
+long as you like.
+
+<p id="opt-A">
+The indirection through a shell (via <code class="sh">sh -c</code>) is
+a little cumbersome.  We need that to expand the environment variable
+set by <code class="sh">ptbw</code>.  We can eliminate that by moving
+the tokens to the command line with the <code class="opt">-A</code>
+option.  This option appends the tokens to the end of the argument
+vector for the <code class="param">client</code> command, so the
+above example becomes:
+<blockquote class="file"><pre><code >ptbw -R2 -A echo</code></pre></blockquote>
+
+<p>
+When calling a shell script that takes the tokens as
+positional parameters (on the end of the argument list) the
+<code class="sh">-A</code> form is much better.
+Use the environment form when the program that
+consumes the tokens is not the direct client, that is
+don't use a shell to set an environment variable if you don't need
+the shell at all.
+
+<h2>A persistant instance</h2>
+
+Moving our attention back to the master aspect of the wrapper,
+what <code class="param">utility</code> would a
+a "global" instance select?  The processes that the global
+instance serves are not descendent from that process, they
+locate the service by a well-known socket name, not by an
+inherrited environment.  So there is no clear process in
+which to <code class="lib">wait</code>.
+
+<p>
+The special name "<code class="opt">:</code>" (a colon) denotes
+a <code class="param">utility</code> that blocks until the
+process is explicitly shutdown.  An instance started with this
+feature is called a "persistant instance".
+
+<p id="opt-Q">
+There are two ways to stop a persistant instance.  One way is
+to send the process a <code class="markup">TERM</code> signal.
+The other is the start a client with the
+<code class="opt">-Q</code> option: when that client disconnects from
+the master it gracefully shuts itself down.
+
+<P>
+To try that start a detached instance with (I'm assuming the
+environment variable <code class="env">USER</code> is set to your login name):
+<blockquote class="file"><pre><code >ptbw -m -R2 -J3 -N /tmp/$USER.ptbw : &amp;</code></pre></blockquote>
+
+<p>
+Then repeat the command below to output pairs of tokens from that instance:
+<blockquote class="file"><pre><code >ptbw -t /tmp/$USER.ptbw -A -R2 echo</code></pre></blockquote>
+
+<P>
+After running this command to terminate the background instance:
+<blockquote class="file"><pre><code >ptbw -Q -t /tmp/$USER.ptbw -R0 true</code></pre></blockquote>
+you should get notification that the background process terminated.
+Repeat that experiment with a client that stalls for a bit, say 15 seconds:
+<blockquote class="file"><pre><code >ptbw -t /tmp/$USER.ptbw -R2 sleep 15 &amp;</code></pre></blockquote>
+then ask the master to exit, and it will not exit until the client
+does.  This is actually quite a feature.
+
+<h2 id="detached">Detached instances</h2>
+
+<p id="opt-d">
+The basic wrapper tactic includes detached diversions, that is diversions
+that don't modify the stack environment.  <code class="sh">Ptbw</code>
+implements this with the standard <code class="opt">-d</code> command-line
+option.
+
+<p>
+A detached diversion publishes the client socket in
+the environement variable <code class="env">ptbw_d</code>.
+This is used as a <code class="param">tags</code> specification under
+<code class="opt">-t</code> in a client instance to directly
+address the detached diversion.  The value could be record in a
+file, or send to another process through any of the many UNIX
+<acronym title="inter-process comunications">IPC</acronym>
+facilities.
+
+<p>
+The value of <code class="env">ptbw_d</code> must be recovered
+and recorded by <code class="param">client</code> directly, as
+it may be used by any other program that needs a detached diversion of
+<code class="sh">ptbw</code>.
+In other words the variable doesn't need to be preserved by
+any service that needs a detached instance, but it may be
+preserved.
+It is considered good form to preserve any detached names if
+it is not a bother to do so.  It is also considered poor form
+to depend on this polite behavior in unrelated applications.
+
+<h2>Resources allocation and contention</h2>
+
+In some cases we need two (otherwise) unrelated resources to
+get a task started, for example an in-bound and out-bound modem.
+Starvation and live-lock/dead-lock are real posibilities in this
+case.  To avoid such issues I use a few tactics:
+
+<H3 id="pairs">Paired resource</H3>
+
+When resources are almost always provided in pairs pool them in
+pairs.  A line from a <code class="param">tag</code> file could
+be a list of resources, and <code class="sh">xapply</code>'s
+dicer mark-up can split those for you in a few characters.
+
+<P>
+In the rare case where you've "over allocated" by not using part
+of the resources you allocated you have to ask yourself if that is
+worth the risk of live-lock or the complexity of coding a lot more
+structure to allocate exactly what you (think) you need now.
+
+<h3 id="flock">Use <code class="sh">flock</code>(1)</h3>
+
+A long time ago I coded a shell interface to the BSD
+<code class="libc">flock</code>(2) system call.  When allocating
+more than one resource you can start a <code class="sh">ksh</code>
+co-process to hold a lock on a flag file that all consumers
+use.  After you have the resources you terminate the co-process
+and go on your way.  This prevents live-lock from allocation
+order inversions in competing code.
+
+<h3 id="limited">Allocate the most limited one first</h3>
+
+If you know that one resource is more limited that another
+always block on that one before you ask for the less limited one.
+Processes do not spend time holding other resources locked while
+blocking on the bottle-neck.
+
+<h3 id="donot">Don't use <code class="sh">ptbw</code></h3>
+
+For some resources it makes much more design-sense to limit
+resource consumption in some other way.
+For example band-width across network, disk, or the like might
+be limited by <code class="sh">atlq</code>,
+<code class="sh">rsync</code>'s <code class="opt">--bwlimit</code>
+or by some other throttle.
+In these cases <code class="sh">ptbw</code> might not be the
+right tool to partition such a band-width class resource.
+
+
+<h2>Use cases</h2>
+
+While all the above is a pretty good stream of facts some readers
+still might be wondering,
+"How would I know I needed <code class="sh">ptbw</code>?"
+
+<P>
+When you have a list of tasks, and each task requires a "resource",
+but the resources are general enough to do any single task you might
+need <code class="sh">ptbw</code>.  You would need it to select a
+resource to process an item from the list, not knowing the pairing
+apriori.
+
+<P>
+Looking at it the other way; if I pair these numbers and letters:
+<blockquote class="file"><pre><code >0	A
+1	B
+2	A
+3	B
+4	A
+5	B</code></pre></blockquote>
+Then I give that list of tasks to 2 worker threads, the first uses
+"A" to process task "0", while the second uses "B" to process task 1.
+When the one using "A" finishes it could start on "2", but what if the
+one using "B" finishes first and trys to use resource "A" while task
+"0" is still in process?
+
+<P>
+We would need to "hard partition" the list into "A-only" and "B-only",
+thereby binding the resource to the thread, to keep double allocation
+from breaking the process.  Such hard paritions limit the total
+throughput of the system by holding one of the resources locked while
+no process needs it (for example when A-only finishes, but B-only
+still has many tasks to complete, we can't use "A" to work on any).
+
+<h3>These sounds like <code class="sh">xapply</code></h3>
+
+Because we are starting all the tasks in an explicit way, this sounds a
+lot like a job for <a href="../xapply/xapply.html"><code class="sh">xapply</code></a>,
+and it is.
+<code class="sh">Ptbw</code> itself just manages the environment, some client
+code must start the tasks with the payload (unit of work) bound to
+the allocated resource, and
+<code class="sh">xapply</code> knows all about that.
+
+<p>
+<code class="sh">Xapply</code> includes a built-in client for
+the <code class="sh">ptbw</code> wrapper.
+Under <code class="opt">-t</code> <code class="sh">xapply</code> figures out
+if it needs to wrap itself in
+an enclosing <code class="sh">ptwb</code> instance, or
+just connect to an existing one based on
+the type of the <code class="param">tags</code> parameter (file or socket).
+
+<p>
+<code class="sh">Xapply</code> knows how to make a client
+connection to the enclosing <code class="sh">ptbw</code> instance to allocate
+tokens for its many tasks.  It returns those tokens only as it
+runs out of new tasks to start, it doesn't release tokens if it is
+going to immediately issue again.  The current implementation
+of <code class="sh">xapply</code> doesn't fetch additional tokens after the
+initial allocation, so when others come available it won't
+run a wider parallel factor: that's a missing feature.
+<!-- And eventually I'll fix it. (ksb) -->
+
+<P>
+See the <A href="../xapply/xapply.html">xapply HTML</A> document for
+examples of the <code class="sh">xapply</code> interface.
+
+<hr>
+<pre>$Id: ptbw.html,v 1.14 2010/08/13 17:17:17 ksb Exp $
+</pre>
+</body></html>

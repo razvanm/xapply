@@ -1,0 +1,556 @@
+.\" $Id: xapply.man,v 3.37 2010/07/22 17:39:15 ksb Exp $
+.\" by Kevin Braunsdorf
+.\" $Compile: Display%h
+.\" $Display: ${groff:-groff} -Tascii -man %f | ${PAGER:-less}
+.\" $Display(*): ${groff:-groff} -T%s -man %f
+.\" $Install: %b -mDeinstall %o %f && cp %f $DESTDIR/usr/local/man/man1/xapply.1
+.\" $Deinstall: ${rm-rm} -f $DESTDIR/usr/local/man/[cm]a[nt]1/xapply.1*
+.TH XAPPLY 1 LOCAL
+.SH NAME
+xapply \- extended apply and xargs replacement
+
+.SH SYNOPSIS
+.ds PN "xapply
+\fI\*(PN\fP \fB\-f\fP [\fB\-Adgmnsuvxz\fP] [\fB\-\fP\fIcount\fP] [\fB\-a\fP\~\fIc\fP] [\fB\-e\fP\~\fIvar=dicer\fP] [\fB\-i\fP\~\fIinput\fP] [\fB\-J\fP\~\fItasks\fP] [\fB\-N\fP\~\fIelse\fP] [\fB\-p\fP\~\fIpad\fP] [\fB\-P\fP\fIjobs\fP] [\fB\-R\fP\~\fIreq\fP] [\fB\-S\fP\~\fIshell\fP] [\fB\-t\fP\~\fItags\fP] \fIcmd\fP [\fIfiles\fP]
+.br
+\fI\*(PN\fP [\fB\-Adgmnsuvx\fP] [\fB\-\fP\fIcount\fP] [\fB\-a\fP\~\fIc\fP] [\fB\-e\fP\~\fIvar=dicer\fP] [\fB\-i\fP\~\fIinput\fP] [\fB\-J\fP\~\fItasks\fP] [\fB\-N\fP\~\fIelse\fP] [\fB\-P\fP\fIjobs\fP] [\fB\-R\fP\~\fIreq\fP] [\fB\-S\fP\~\fIshell\fP] [\fB\-t\fP\~\fItags\fP] \fIcmd\fP [\fIargs\fP]
+.br
+\fI\*(PN\fP \fB\-h\fP
+.br
+\fI\*(PN\fP \fB\-V\fP
+.br
+
+.sp
+.SH DESCRIPTION
+.PP
+Extended apply is intended to be a complete replacement for
+the \fIapply\fP and \fIxargs\fP commands.
+In the normal mode \fI\*(PN\fP emulates the best features of
+\fIapply\fP (substitutes limited percent escapes to form and
+execute shell commands).
+Under \fB\-f\fP it emulates a \fIxargs\fP-like processor.
+.PP
+Unlike \fIxargs\fP this program deals in fixed argument lists.
+Each positional parameter (or input line) is treated as a single
+argument for the expanded command (embedded blanks, tab, quotes
+and the like are \fBnot\fP special).
+If a variable argument list is required it may be built with
+\fIfmt\fP or \fIadjust\fP (or any other text processor) and
+passed in pre-formatted (see BUGS).
+.PP
+The fixed argument list is built from a hunk of \fIcount\fP
+parameters from the command line.
+These parameters are usually interpreted as fixed strings, but
+under \fB\-f\fP they are taken as \fIfiles\fP whose lines are
+each taken sequentially as arguments.
+.PP
+The positional parameter \fIcmd\fP is the template command to control each task.
+In this template each occurrence of the escape character \fIc\fP,
+percent (\*(lq%\*(rq) by default, followed by a digit ([1-9]) is replaced by
+the current argument for that slot.
+When no such expansions occur in a template the whole argument list is
+catenated on the end of \fIcmd\fP
+(prefixed by a blank when needed).
+.PP
+To extend this a bit we also allow curly braces to enclose larger
+integer value (e.g. %{15}) as make(1) does for macro names.
+In addition the value zero (in either case) is taken to mean
+no expansion is expected; this suppresses the default catenation of
+the whole argument list as well.  The catenation of the whole list
+may be explicitly specified via the index star (\*(lq*\*(rq).
+The last parameter may be specified by the index dollar-sign (\*(lq$\*(rq).
+.PP
+When the \fB\-f\fP option is applied the name of the file that supplied
+a parameter is available with \fB%f\fP followed by a specification.
+.PP
+To keep up with more complex structures the dicer form is allowed to
+extract subfields from input parameters:
+.sp
+	\fB%[\fP\fIparam\fP \fIseparator\fP \fIfield\fP \fI...\fP\fB]\fP
+.sp
+The positional parameter \fIparam\fP is broken into fields at
+the character \fIseparator\fP.  The resultant \fIfield\fP is
+then substituted, or diced again.
+A negative \fIfield\fP inverts this meaning by removing the
+resultant field from the original list.
+The special field dollar-sign (\*(lq$\*(rq) is taken as
+the last field.
+.PP
+When a literal blank is used as the \fIseparator\fP, it matches
+any number of white space characters.  The universal escape character
+backslash (\e) may be used to quote any of blank, backslash, close
+bracket, or any digit to suppress its special meaning.
+Additional \fIseparator\fP and \fIfield\fP pairs may be used to
+further limit the expansion.
+.PP
+The additional form \fB%t\fP selects a group of \fIreq\fP `resources',
+which are bound to a running task for the life of the process.
+The list of resources must be indexed by slot (as \fIparam\fPs are), and
+may be the data source for a dicer expression (e.g. \fB%t[1/$]\fP).
+A as bonus \fB%ft\fP expands to the filename presented
+for \fItags\fP, or the string \fBiota\fP when the original \fItags\fP
+name cannot be recovered.
+.PP
+The special form \fB%u\fP provides a sequential integer which is unique
+for each iteration of \fI\*(PN\fP's command processor.
+This is useful to form unique temporary files, to read the output of the
+last iteration as input, or as a "loop counter".  It starts at zero.
+In addition \fB%u\fP may be the data source for a dicer expression
+(e.g. %[u\e0$]), but that's not really very useful.
+.PP
+The special field selection star (\*(lq*\*(rq) selects the
+catenation of the selected arguments, be they tokens, filenames, or
+parameters.  This may also be used as the source for a dicer expression.
+.PP
+For the unusual case where all that is not enough power the form \fB%+\fP
+shifts the values of %1, %2, ... to the left once to form a
+recursive expression treating the old %1 as a \fIcmd\fP.  After
+that expression expands processing continues with the rest of
+the present template.  See \fIhxmd\fP(8L).
+.PP
+As a concession to shell programmers an additional flag "q" is allowed
+after the leading precent (as \*(lq%q\*(rq) to quote the result of any
+expansion such that the shell quoting rules for double-quotes
+produces the expanded text exactly.  Each of double-quote (\*(lq"\*(rq),
+backslash (\*(lq\e\*(rq), grave accent (\*(lq`\*(rq), and
+dollar-sign (\*(lq$\*(rq) are protected with a single backslash.
+.PP
+Enclose any of the above expressions in
+parenthesis to gain access to the mixer.
+.sp
+	\fB%(\fP\fIdicer\fP \fB,\fP \fImixer\fP \fI...\fP\fB)\fP
+.sp
+This is a character-based expander, the characters in the expanded
+string are numbered from 1 to $.  Any range may be selected for
+output.  For example %([1 2],3) is replaced by the third character
+of the second word in the first parameter.
+To make %u more useful: the expansion of %(u,$) is the last digit of
+the counter, which is the counter modulo 10.
+More complete documentation on the mixer
+is available in the explode repository, or the \fBmk\fP(1) documentation.
+
+
+.SH TAGS
+Under any combination of \fB\-t\fP, \fB\-R\fP, or \fB\-J\fP
+\fI\*(PN\fP wraps itself in an instance of \fPptbw\fP
+to manage resource allocation, unless \fItags\fP indicates a
+reference to an enclosing manager.
+For details on resource processing see \fIptbw\fP(1L).
+Note that \fI\*(PN\fP uses \fIptbw\fP's itoa default (the integers from
+0 to \fIjobs\fP-1) when none of
+\fIptbw\fP options are presented
+(making it transparent for other uses of \fIptbw\fP).
+.\" It is too late to save you, if you know why this is a Good Thing. -- ksb
+
+.SH OPTIONS
+.TP
+\fB\-\fP\fIcount\fP
+Each expanded command requires \fIcount\fP of arguments.
+.TP
+\fB\-A\fP
+Emulate \fIptbw\fP's \fB\-A\fP option by appending the \fB%t\fP
+values on the shell argument vector, which allows access to them
+as \fI$1\fP, \fI$2\fP, an so on.
+On systems where \fIcsh\fP needs a pad argument, one (\*(lq_\*(rq) is
+inserted before the token list, this padding is always provided
+for \fIsh\fP(1) and compatible shells (viz. \fIksh\fP).
+If the \fIshell\fP selected is \fIperl\fP the normal \fB-c\fP is
+replaced with \fB\-e\fP.
+Note in \fIperl\fP the values are presented as
+\fB$ARGV[0]\fP, \fB$ARGV[1]\fP\fI...\fP.
+.TP
+\fB\-a\fP \fIc\fP
+Change the escape character from percent (%) to \fIc\fP.
+.TP
+\fB\-d\fP
+Passed on to \fIxclate\fP to inhibit the publication of our
+master socket into the \fIxclate\fP environment chain.
+To be sure this works the command must be called with \fB$xcl_d\fP unset.
+This might be used to isolate the use of \fB\-m\fP, in some rare cases.
+.TP
+\fB\-e\fP \fIvar\fP=\fIdicer\fP
+.TP
+\fB\-e\fP \fIvar\fP
+Set the environment variable \fIvar\fP to the expansion of
+\fIdicer\fP (with all the percent escapes supported for \fIcmd\fP)
+for each process launched.
+The default \fIdicer\fP expression (when only \fIvar\fP is presented)
+is an expression to extract the next fixed parameter, in turn.
+.TP
+\fB\-f\fP
+Arguments are read one per line from the input \fIfiles\fP.
+Each file is opened and scanned for arguments (which are only
+separated by newlines).
+Note that all references to the stdin ("-") stream share the stream:
+that is, arguments are taken round-robin from each active reference.
+Files are hunked together by the \fB\-\\fP\fIcount\fP option as fixed
+parameters would be.
+.TP
+\fB\-g\fP
+Use \fBgtfw\fP to get a global unique value for \fB%u\fP, rather than
+the internal local counter.  This only works when \fI\*(PN\fP is
+wrapped in a \fBgtfw\fP.  This also changes \fB\-N\fP's \fIxid\fP from "00" to
+a unique number, as multiple parallal instances may have zero itterations.
+Even without \fB\-f\fP the specification \fB%fu\fP represents the
+source of the unique stream.  Without \fB\-g\fP that source is spelled as
+a single dot (\*(lq.\*(rq).
+.TP
+\fB\-h\fP
+Print a help message.
+.TP
+\fB\-i\fP \fIinput\fP
+Under \fB\-f\fP sub-tasks competing for input with
+\fI\*(PN\fP lead to madness.
+\fIXapply\fP opens all sub-tasks stdin to a shared stream from \fIinput\fP.
+Under \fB\-f\fP this defaults to \fB/dev/null\fP.
+.TP
+\fB\-n\fP
+Do not execute commands, trace only, which implies \fB\-v\fP.
+When \fB%t\fP is presented in \fIcmd\fP \fI\*(PN\fP might complain
+.nf
+	%t used with \-n, possible locking issues
+.fi
+Because the output, when run in parallel, will not honor the
+semantics of \fB\-t\fP (below).
+.TP
+\fB\-m\fP
+Untangle the output of parallel commands with the
+\fIxclate\fP collation filter.
+The \fIxid\fP passed
+to the \fBxclate\fP filter is the expansion of \fI%1\fP, or
+if that is the empty string the expansion of \fI%u\fP.
+When not already in a collated environment, \fI\*(PN\fP wraps itself
+in one.
+.TP
+\fB\-J\fP \fItasks\fP
+Specify the number of tasks that \fIptbw\fP should accommodate
+under this \fBentire\fP process tree.
+Unless \fB\-t\fP prevents it,
+this switch forces an instance of \fIptbw\fP(1L) to
+be wrapped around \fI\*(PN\fP.
+When the number of \fItasks\fP is specified as zero the \fIptbw\fP system
+default may be employed, making \fIjobs\fP the upper bound.
+.TP
+\fB\-N\fP \fIelse\fP
+Launch the shell command \fIelse\fP when no \fIcmd\fP would be launched,
+either because \fIargs\fP was empty or all of \fIfiles\fP were zero length.
+This is a trap for zero iterations of the loop.  The normal percent
+expansions for positional parameters are bound to the whole argument
+list, use an explict "%0" to suppress the catenation of these parameters to
+\fIelse\fP.
+Also \fB%t\fP and \fI%u\fP work.
+The xid passed to \fIxclate\fP is double-zero (\*(lq00\*(rq), so that
+the exit code from the else may be processed out-of-band, if required.
+.TP
+\fB\-p\fP \fIpad\fP
+Files with inadequate length are padded with this token, by default
+the empty string.
+.TP
+\fB\-P\fP\fIjobs\fP
+Number of tasks to run in parallel.
+\fIXapply\fP tries to keep at most \fIjobs\fP processes running in
+parallel.
+If the environment variable \fBPARALLEL\fP is set then it is
+read for a default value.
+\fI\*(PN\fP waits for all tasks to finish before it exits.
+.TP
+\fB\-R\fP \fIreq\fP
+The number of tokens allocated to each task, either from \fItags\fP
+or from the default integer tableau.
+The also forces a \fIptbw\fP around the \fI\*(PN\fP process,
+unless \fB\-t\fP prevents it.
+There is a special case when \fIreq\fP is specified as zero:
+the \fB\-R\fP option is not passed on to \fIptbw\fP
+when started, and no tokens are allocated from it
+(in fact no tokens are available at all).
+.TP
+\fB\-s\fP
+Under this option when a task produces no output the \fIxclate\fP filter
+squeezes out the existence of the command (no header, output, or
+horizontal footer).  This speeds the task stream substantially under
+\fB\-m\fP, but only when a large fraction of the tasks produce no output
+and are evenly distributed between the tasks that produce output.
+.TP
+\fB\-S\fP \fIshell\fP
+Specify shell to run tasks under.
+\fIXapply\fP looks for the environment variable \fBSHELL\fP
+or uses the built-in default \fB/bin/sh\fP.
+In any case \fIshell\fP must take \fB\-c\fP as sh(1) does,
+unless its basename contains the string \fBperl\fP, in which
+case it should take \fB\-e\fP.
+.TP
+\fB\-t\fP \fItags\fP
+The resources (tokens, targets, terms) read from \fItags\fP
+create the tableau used by \fB%t\fP, and are controlled by an
+instance of \fIptbw\fP.
+.sp
+The special \fItags\fP name dash (\*(lq-\*(rq)
+is taken to imply that an \fBexisting\fP instance of \fIptbw\fP
+must enclose \fI\*(PN\fP.
+An alternate form is to give the path to a \fIptbw\fP (or \fIptbw\fP-like)
+socket as \fItags\fP.
+.\" See the client interface code in ptbw's module ptbc.m.
+.TP
+\fB\-u\fP
+Use the value of \fB%u\fP as the \fIxid\fP sent to any \fIxclate\fP
+output filters under \fB\-m\fP.
+.\" Used largely by \fIhxmd\fP.
+.TP
+\fB\-v\fP
+Be verbose.  Echo shell commands to \fIstdout\fP.
+\fBThis option is deprecated, in light of \fB\-t\fP.\fP
+.TP
+\fB\-V\fP
+Show version information.
+.TP
+\fB\-x\fP
+Echo processed commands to \fIstderr\fP as they are launched.
+.TP
+\fB\-z\fP
+Under \fB\-f\fP read input files as if they were output from
+\fBfind\fP's \-print0 option.
+
+.SH ENVIRONMENT
+Always export any environment variable need by any descendant commands.
+For example the \fIksh\fP script fragment:
+.RS
+TEMP1=/tmp/mtf$$.$((RANDOM%100))
+.br
+mkdir $TEMP1
+.br
+\*(PN 'cp %1 $TEMP1/%1' $LIST
+.RE
+may expand \fB$TEMP1\fP to the empty string, as the expanding shell
+is not the script, but a new one started by \fI\*(PN\fP.
+To make the script function as (I) intended, either
+export $\fBTEMP1\fP before the \fI\*(PN\fP with
+.RS
+export TEMP1
+.RE
+or use double, rather than single, quotes around the \fIcmd\fP.
+.PP
+The \fB-e\fP option allows descendant \fIxclate\fP output
+management processes to see more data than they otherwise could.
+Using the dicer to produce a more informative $\fBXCLATE\fP itself,
+or, by reference, in some variable via \fIxclate\fP's %{\fIenv\fP}
+expansion might expand under the \fB\-T\fP and \fB\-H\fP options.
+.TP
+$\fBXAPPLY_WRAP\fP
+Used by \fI\*(PN\fP in the wrapping of itself in a \fIptbw\fP.
+This variable should be avoided.
+.TP
+$\fBSHELL\fP
+Setting this to an uncommon value may cause poorly formed
+\fI\*(PN\fP's in descendant processes to fail.
+Always use \fB\-S\fP explicitly to set the shell to
+something other than a Bourne compatible shell.
+.\" Your millage may vary
+.TP
+$\fBPARALLEL\fP
+The default value for \fB\-P\fP, when specified without a number.
+
+.SH EXAMPLES
+.TP
+\fI\*(PN\fP 'cd %1 && make all' */
+Change context to each directory in the current directory in turn and
+run \fBmake all\fP.
+.TP
+\fI\*(PN\fP 'grep \-l \fItarget\fP %1 >/dev/null || echo %1' *.html
+List all the HTML files which do not contain the pattern \fItarget\fP.
+This emulates \fIgrep\fP's \fI\-L\fP option, when it is not supported.
+.TP
+\fI\*(PN\fP \-f 'diff %1 ../version5/%1' manifest | more
+Compare the files listed in \fBmanifest\fP from the current
+directory to the versions with the same name
+in \fB../version5\fP
+.TP
+\fI\*(PN\fP \-p/dev/null \-f \-2 'diff %1 %2' manifest1 checklist1
+Compare (with \fBdiff\fP) each file in \fBmanifest1\fP to the same
+file in \fBchecklist1\fP.  Substitute \fB/dev/null\fP for missing
+files on the end.
+{This is only useful if the input files are known to have
+the arguments in a stable order.}
+.TP
+\fI\*(PN\fP 'indent' *.c
+Run \fBindent\fP for each C source file in the current directory.
+.TP
+find ~ksb/bin \-type f ! \-perm \-111 \-print | \fI\*(PN\fP \-fx 'chmod a+x' \-
+Find plain files in my bin which are not executable by all, let
+\fI\*(PN\fP try to fix each (and show me the progress).
+.TP
+find */ \-... | fmt 960 1024 | \fI\*(PN\fP \-f \-i /dev/tty 'vi' \-
+Run \fIvi\fP on blocks of files from the \fIfind\fP command.
+This is \fBso\fP clever.
+.TP
+find ... | \fI\*(PN\fP \-f \-5 \-i /dev/tty 'vi' \- \- \- \- \-
+Edit five files at a time (until the last edit).
+.TP
+\fI\*(PN\fP \-fn "" /etc/passwd
+A slower version of \fBcat\fP(1).
+.TP
+tr ':' '\e012' < /etc/passwd | \fI\*(PN\fP \-7 \-nf 'chown %1 %6' \- \- \- \- \- \- \-
+Shows one way to get the fields of the password file into \fI\*(PN\fP escapes.
+.TP
+\fI\*(PN\fP \-nf 'chown %[1:1] %[1:6]' /etc/passwd
+A simpler way to get the same password information.
+.TP
+\fI\*(PN\fP \-V
+Output \fI\*(PN\fP's version information.
+.TP
+\fI\*(PN\fP '[ \-d %1/RCS ] || echo %1' */
+Output each subdirectory that does not have an RCS cache.
+.TP
+\fI\*(PN\fP \-f '[ \-f %1 ] && echo %1' List | ...
+Output the pathnames from \fIList\fP that presently exist (note the
+inverse could be accomplished as well with \fB||\fP rather than \fB&&\fP).
+.TP
+find . \-name \e*.core \-print0 |\fI\*(PN\fP \-fzx 'cd %[1/$] && mv core /crash/core.%u' \-
+Locate core files, chdir into the target directory, move the core to a
+(fictional) /crash directory with a uniq extender.
+.TP
+\fI\*(PN\fP \-n \-f \-2 '%2' \- \-
+Output only the even lines from \fIstdin\fP
+(use '%1' rather than '%2' for the odd lines,
+use '' to join pairs of lines.)
+Often used in combination with sed(1) to join stanza files,
+like AIX uses, into something we can process.
+.TP
+jot 999 2 |\fI\*(PN\fP \-f 'set _ `factor %1` && [ $# \-eq 3 ] && echo %1' \-
+Output all 168 prime numbers from 2 to 999
+(be sure /usr/games is in \fB$PATH\fP).
+.TP
+\fI\*(PN\fP \-n \-4 '(%+)' "one.%2" two three four
+Outputs "(one.three)".  The \fB%+\fP expander is magic, when you need it.
+Use with care, as the old %1 may be tainted.
+.TP
+\fI\*(PN\fP \-x \-P4 'ppp \-unit%t1 %1' $LIST
+Run to start \fIppp\fP(1) up to 4 sessions explicitly on
+\fBtun\fP units (0, 1, 2, and 3), as each finishes another from
+the list will be started on the newly available \fBtun\fP device.
+.TP
+\fI\*(PN\fP \-fP8 \-t openif.ct 'iftester %t[1] %[1]' nets.cl
+Given \fIopenif.ct\fP has a list of open interfaces (e.g. fxp1, bge0, xl0)
+and \fInets.cl\fP has a list of networks to test, the fictional
+\fIiftested\fP program runs once for each network, each time
+with an available interface.
+.TP
+\fI\*(PN\fP \-fP8 'iftester $IF%t1 %1' nets.cl
+Use the environment variables \fB$IF0\fP, \fB$IF1\fP... to replace the
+file \fIopenif.ct\fP above.  This assumes there are at least 8 such
+variables exported to the subshells, so the use
+of ${IF%{t}:?...} might be wise here.
+.TP
+\fI\*(PN\fP \-e C1=%1 \-e C2=%2 \-f \-2 '%0diff $C1 $C2' list1 list2
+Avoid using the dicer, in favor of using the shell.
+The \fB%0\fP expansion turns off the auto-append of \fB%*\fP.
+.TP
+\fI\*(PN\fP \-e C1 \-e C2 \-f \-2 '%0diff $C1 $C2' list1 list2
+Shorthand for the command above.
+.TP
+\fI\*(PN\fP \-fA \-R2 \-P4 \-t $HOME/lib/service.cl 'mystery $1 %1 $2' \-
+Launch at most 4 copies of the \fImystery\fP program over
+the elements from \fIstdin\fP
+with 2 resources selected from \fB$HOME/lib/service.cl\fP
+This might be constrained by the count of the lines in the services.cl
+file, or the limit of 4 given to \fB\-P\fP or
+the number of input line from \fIstdin\fP, which ever is smaller.
+.TP
+\fI\*(PN\fP \-fR2 \-P4 \-t $HOME/lib/service.cl 'mystery %t1 %1 %t2' \-
+The same command, without the \fB-A\fP indirection.
+.TP
+\fI\*(PN\fP \fB\-N\fP '%0echo Nothing to compress.' 'gzip' $FILES
+Compress all of \fB$\fPFILES, or complain there were none.  The
+\fB%0\fP suppresses the catenation of any positional parameters, and
+is only really needed under \fB\-f\fP, but is always good style to include.
+.TP
+\fIfind\fP ... \-print0 |\fI\*(PN\fP \-fz 'echo "gzip %q1" >/var/run/fifo' -
+Protect the command stream on input with the zero separator, then
+on output with the quote expansion.
+Thus files with a newline, dollar, or double-quote in
+their name will be passed literally to the fifo consumer process.
+.TP
+\fI\*(PN\fP -f 'echo "%q(1,$-1)"' -
+Use the mixer to reverse the character in
+each line of \fIstdin\fP to \fIstdout\fP.
+.TP
+\fI\*(PN\fP -nf '%(1,$-1)' -
+A much faster version of the previous example, which doesn't spawn
+at least one process per line.
+
+.SH BUGS
+.PP
+The interaction between \fB\-t\fP and \fB\-P\fP is odd, in that
+the number of \fB%t\fP resources limits the parallel factor.
+The "minimum rule" is not really a bug as one might
+use `\fIwc\fP \fB\-l\fP` to count the lines in \fItags\fP,
+if you are certain that will not run too many parallel tasks.
+.PP
+Given that \fIreq\fP tokens are required to run a task,
+it is possible to have too few tokens to run even a single task.
+This is not as much a bug as a feature, \fI\*(PN\fP will
+exit with failure code DATAERR (65) in this case.
+.PP
+A worse issue is the use of \fB%t\fP and \fB\-n\fP when the output
+is later executed in parallel.  The semantics of \fB%t\fP are only
+maintained when \fI\*(PN\fP keeps track of the running tasks: when
+another processor launches the tasks there is no way for it to
+knows which strings represent the expansion of \fB%t\fP.
+.PP
+There is no access to \fIptbw\fP's \fB\-\fP\fIdepth\fP option for \fB\-t\fP.
+As a work around one might use a specification of the controlling
+socket through the clues \fIptbw\fP leaves in the environment, this
+assumes \fB$DEPTH\fP is set to a small integer:
+.RS
+.nf
+eval PTBW_SOCK=\e${ptbw_`expr $ptbw_link - $DEPTH`}
+\fI\*(PN\fP \fB\-t\fP ${PTBW_SOCK:?"too shallow"} \fI...\fP
+.fi
+.RE
+.PP
+Under \fB\-f\fP in the context of an \fIelse\fP command the parameter
+markup is bound to the list of \fIfiles\fP presented (all of which must
+be zero length).  The catenation of this list to the \fIelse\fP
+command was dropped by some older versions of \fI\*(PN\fP: that was
+a bug, not a feature.
+
+.PP
+Some more escapes might be useful.  (Of course I'd say that.)
+.PP
+This program will not even compile without \fIxclate\fP(1) installed
+in the builder's search path.
+At run time \fB\-m\fP fails when either \fIxclate\fP or \fIptbw\fP are
+required and not installed (with a file not found error from \fBexecve\fP(2)).
+.PP
+Should have a filter buddy that knows \fBxargs\fP's input rules to
+convert a input stream to our style.  But then again who uses
+the broken \fBxargs\fP quoting rules?
+.\" This turns out to be tirvial in perl.
+.PP
+Modern \fIfmt\fP is too smart and won't work on file names that
+start with dot (it thinks they are nroff directives).  This crosses
+that fine line I always talk about.
+One can use a \fBsed\fP filter, viz.
+.RS
+sed \-e 's,^\e.//*,,' | fmt ...
+.RE
+to repair the damage for list of files (the output of \fIfind\fP).
+.PP
+The first version of \fB%t\fP was slightly incompatible with the
+present implementation (in version 3.19).
+.PP
+The fact that under \fB\-t \-\fP the expansion of \fB%ft\fP reports
+the correct filename (given to the enclosing \fIptbw\fP) should be taken as
+a feature, not a bug.
+The reason the name \fBiota\fP is presented as the default (for \fB%ft\fP)
+is unclear to everyone, but the author and other FP, J, or APL programmers.
+.\" It might be that the iota default could be replaced, later.
+
+.SH AUTHOR
+K S Braunsdorf, from the Non-Player Character Guild
+.br
+xapply at-not-a-spammer ksb dot npcguild.org
+
+.SH "SEE ALSO"
+sh(1), cat(1), xclate(1L), ptbw(1L), apply(1), xargs(1),, hxmd(8L)
+.br
+fmt(1) or adjust(1), make(1), find(1), vi(1), sed(1), ppp(8)

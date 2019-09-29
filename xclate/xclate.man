@@ -1,0 +1,435 @@
+.\" $Id: xclate.man,v 2.27 2010/07/08 15:16:25 ksb Exp $
+.\" by Kevin Braunsdorf
+.\" $Compile: Display%h
+.\" $Display: groff -tbl -Tascii -man %f | ${PAGER:-less}
+.\" $Display(*): groff -tbl -T%s -man %f
+.\" $Install: %b -mDeinstall %o %f && cp %f $DESTDIR/usr/local/man/man1/xclate.1
+.\" $Deinstall: ${rm-rm} -f $DESTDIR/usr/local/man/[cm]a[nt]1/xclate.1*
+.TH XCLATE 1L LOCAL
+.SH NAME
+xclate \- collate output from parallel tasks
+.SH SYNOPSIS
+.ds PN "xclate
+\fI\*(PN\fP \-\fBm\fP [\-\fBAdnQrsv\fP] [\-\fIdepth\fP] [\-\fBH\fP\~\fIhr\fP] [\-\fBi\fP\~\fIinput\fP] [\-\fBL\fP\~\fIcap\fP] [\-\fBN\fP\~\fInotify\fP] [\-\fBO\fP\~\fIoutput\fP] [\-\fBT\fP\~\fItitle\fP] [\-\fBu\fP\~\fIunix\fP] [\-\fBW\fP\~\fIwidow\fP] [\fIutility\fP]
+.br
+\fI\*(PN\fP [\-\fBnQsvw\fP] [\-\fBIEDY\fP] [\-\fIdepth\fP] [\-\fBH\fP\~\fIhr\fP] [\-\fBL\fP\~\fIcap\fP] [\-\fBT\fP\~\fItitle\fP] [\-\fBu\fP\~\fIunix\fP] [\fIxid\fP]\~[\fIclient\fP]
+.br
+\fI\*(PN\fP \-\fBh\fP
+.br
+\fI\*(PN\fP \-\fBV\fP
+.br
+
+.sp
+.SH DESCRIPTION
+The UNIX pipe model for input/output redirection is simple and elegant
+for most single-thread tasks, and scales well for some multi-thread
+applications.
+New issues arise when the speed of computation far exceeds the speed of
+an output device.  Processes block quickly, output from one process
+gets mixed into the output from another, and overall through-put is
+limited to the slowest tasks using the slowest device.
+.PP
+\fBXclate\fP is an attempt to recover from these issues.  Processes
+may output freely to a buffered stream of at least \fIcap\fP bytes
+before they might block (on output).  The output from each tasks
+is flushed completely before a new task is allowed to output.
+While overall through-put is greater, as tasks are cleared in the order
+they finish (more likely) than in the order they started (thus a
+slow task may run with deferred output while several generations
+of quicker tasks complete).
+.PP
+To accomplish this \fBxclate\fP has three modes.
+.TP
+Manager mode
+Under \fB\-m\fP it forks a \fIutility\fP
+with a special environment, then arbitrates use of the original \fIstdout\fP
+channel for any descendant processes created by \fIutility\fP which
+request access.  The default \fIutility\fP in this mode is a shell, either
+the one specified by $SHELL, or \fI/bin/sh\fP.
+A semi-permanent instance may be created when the \fIutility\fP is
+specified as \fB:\fP (a single colon), see \fB\-Q\fP and \fB\-u\fP.
+.TP
+Filter mode -- merge output
+Without \fB\-m\fP or any \fIclient\fP the program reads from \fIstdin\fP
+at most \fIcap\fP bytes then waits for exclusive access to the
+manager's original \fIstdout\fP.  It flushes all the buffered input, then
+pumps the remainder of its \fIstdin\fP to the acquired \fIstdout\fP.
+.TP
+Command mode -- filter and merge output
+Given a \fIclient\fP, and without \fB\-m\fP, the program buffers \fIstdin\fP,
+as it would without a command, waiting for exclusive access to
+the manager's \fIstdout\fP.  When it gains access to the exclusive
+output it starts the given \fIclient\fP with the buffered stream as
+\fIstdin\fP and the manager's \fIstdout\fP, then pumps
+the remainder of its \fIstdin\fP to the new process.  When any options in
+the set \fB\-I\fP, \fB\-E\fP, \fB\-D\fP are set this behavior is modified
+quit a bit.
+.PP
+In either of the last two modes the positional parameter \fIxid\fP
+is the identification for this stream, usually \fBxapply\fP's %1 or %u escape
+or by default \fIxclate\fP's process id.
+Other useful values are the name of a host, directory,
+or device which is the topic of the output.
+Specify \fB\-T\fP and \fB\-H\fP
+to include a title and/or horizontal break around named
+sections.
+
+.SH OPTIONS
+If the program is called \fIxclate\fP then no options are forced.
+The environment variable \fB$XCLATE\fP is read for command line
+options, before the explicit command line.
+That variable may also be changed by \fBxclate\fP for
+descendent processes, see ENVIRONMENT below.
+.TP
+\-\fIdepth\fP
+Specify a collation sequence beyond the tightest enclosing.  A \fIdepth\fP
+of 0 is the default.  A \fIdepth\fP of 1 accesses the next outer
+instance of \fBxclate\fP \fB\-m\fP.
+.TP
+\fB\-A\fP
+Add the name of the controlling socket as the first line of the notification
+stream.  This option is used by \fIsshw\fP to locate the service, as it
+is used in global mode to manage the remote process redirection.
+.TP
+\fB\-d\fP
+Do not link the new manager's diversion socket in the \fB$\fP\fIxclate_link\fP
+environment chain.  Rather the manager socket name is recorded in
+\fB$\fP\fIxclate_d\fP, while \fB$\fP\fIxclate_link\fP is left
+unchanged.
+When the manager socket is specified (via \fB\-u\fP \fIunix\fP) the environment
+variable may be totally ignored, as you already know where the socket is.
+.TP
+\fB\-h\fP
+Print a help message.
+.TP
+\fB\-i\fP \fIinput\fP
+The \fIstdin\fP given to the \fI\*(PN\fP process is replaced
+by this stream for the \fIutility\fP process.  The original
+\fIstdin\fP is available only via the \fB\-I\fP option to client
+\fIxclate\fP instances.  The \fIinput\fP specification
+may be any of "|\fIcommand\fP", "<\fIfile\fP", "<>\fIfile\fP", "<&\fIfd\fP",
+"<&-", "\fIfile\fP", "\fIsocket\fP" or "-" as a shorthand for "</dev/null".
+.TP
+\fB\-H\fP \fIhr\fP
+Add a horizontal rule to end each output stream.  If a client instance
+does not specify a \fIhr\fP the master's is assumed.  An explicit specification
+of the empty string may over-ride this default.
+See \fB\-T\fP for a list of escapes expanded.
+.TP
+\fB\-L\fP \fIcap\fP
+Put a cap on memory based output buffer.  This limits the amount of
+\fIstdin\fP \fBxclate\fP collects before it blocks waiting for
+exclusive access to the manager's \fIstdout\fP.
+The default is 64k, and the value may be postfixed with a scale
+factor, derived from the \fBmkcmd\fP type "bytes".  The master's specification
+of \fIcap\fP is assumed if none is presented on the command-line.
+Use \fB\-L '?'\fP for a list of scale factors.
+.TP
+\fB\-m\fP
+Manage output for descendant processes.
+This starts a new managed output stream (the \fIstdout\fP of the
+.B xclate
+process itself, or the channel created by \fB\-O\fP).
+In the environment of the \fIutility\fP created some variables are
+installed to allow subsequent \fBxclate\fP
+processes to contact the manager process to gain access to
+the shared output stream (see below).
+.TP
+\fB\-N\fP \fInotify\fP
+Send a null terminated string (the xid) to this file, process  or
+file descriptor after each section is complete.  This is largely
+for \fIhxmd\fP's use.  If specified as dash ("\-") the default
+stream is /dev/tty, in which case the null is replaced with a newline.
+The null is needed when the output is read through a pipe, and the
+\fIxid\fP might contain a newline.  The same redirections available
+under \fB\-W\fP are also available.
+.TP
+\fB\-n\fP
+Do not execute commands, trace only.  This doesn't really work,
+but is required by the pipefit code.  Don't try it.
+.TP
+\fB\-O\fP \fIoutput\fP
+Specify a diversion for the collected stream, rather than \fIstdout\fP.
+This assures that no output ends up in the stream without an attending
+\fBxclate\fP process.  The same diversions are allowed as for \fB\-W\fP
+(below), with the exception that a dash ("\-") means to connect to
+an enclosing instance of \fI\*(PN\fP, this groups all our output inside
+the specified diversion.  In this case -\fIdepth\fP specifies
+the depth of the desired diversion.
+.TP
+\fB\-Q\fP
+Any manager instance started with the \fIutility\fP of ":" will continue
+to process until at least one client run with this option finishes.
+This allows a diversion to be started by an unrelated process tree
+to complete after some client completes.  The shutdown is graceful
+and allows presently connected clients to finish, as well as some
+clients that may connect later.
+.\" This is actually what you want, otherwise use kill(1).
+\fIPtbw\fP has exactly the same notion.
+.TP
+\fB\-r\fP
+The \fInotify\fP stream will include the exit status from each
+process before the \fIxid\fP, separated with a comma.
+This may not work in filter mode, as we can't see the exit code
+of the process in all cases (it works for most shells).
+.\" the -p option I hide helps if you are a shell wiz.
+.TP
+\fB\-s\fP
+Totally silence subtasks with no output.  This changes the way
+\fI\*(PN\fP executes some requests to place itself on
+the \fBstdout\fP side of the client process, but
+adds substantial speed when most tasks produce no output.
+Even the title (\fB\-T\fP) and horizontal rule (\fB\-H\fP) are removed for
+tasks with zero length output.  See also \fIxapply\fP, which passes this
+option on to us.  Providing this option in master mode sets the option
+for the whole diversion, as promised in the last release.  All \fIhxmd\fP's
+send \fIxapply\fP this option to speed processing.
+.TP
+\fB\-T\fP \fItitle\fP
+A title for each stream, some limited escapes are replaced:
+.nf
+	\fB%x\fP	xid
+	\fB%s\fP	sequence number (like \fIxapply\fP's \fB%u\fP, in output order)
+	\fB%{\fPENV\fB}\fP	the value of $ENV
+	\fB%%\fP	a literal percent (%)
+.fi
+If the title should not have a trailing newline, make the last character
+be a percent (%).
+.TP
+\fB\-u\fP \fIunix\fP
+Specify a forced unix domain end-point.  This allows
+unrelated instances of \fBxclate\fP (on the host) to share
+a managed output stream.  To make this work you might have to
+change the mode on the manager directory.
+This option is required (in general) to make the persistent mode
+(under -m with \fIutility\fP specified as a single \fB:\fP) useful.
+See below.
+.TP
+\fB\-v\fP
+Be verbose.  Show some of the commands xclate is running in pseudo-shell.
+.\" This will surely confuse you more than it helps.
+.TP
+\fB\-V\fP
+Show version information.
+.TP
+\fB\-w\fP
+The \fIstdout\fP from the client is directed to the widow
+output for the specified \fIdepth\fP.  This is most useful with
+\fIdepth\fP set and multiple diversions in scope.
+.TP
+\fB\-W\fP \fIwidow\fP
+Redirect widowed output to this file, process, or fd.
+Under this option output which is not sent through a descendant \fBxclate\fP
+filter process is gathered into a "widow" section at the end of the output.
+The \fIwidow\fP parameter may be a process (as "|\fIcommand\fP"),
+a file (as ">\fIfile\fP", or ">>\fIfile\fP", or "\fIfile\fP"),
+a local (UNIX) domain socket (as "\fIsocket\fP"),
+any already opened file descriptor (as ">&\fIfd\fP"),
+or a dash (as "-") for \fIstderr\fP.
+
+.SH "COMMAND MODE OPTIONS"
+These options will let you blow your foot completely off, placing it into orbit.
+.\" It is not an accident that they spell "improvised explosive device".
+They are not used by most automation, but allow for some very clever
+shell scripts (see sapply):
+.TP
+\fB\-I\fP
+The \fIclient\fP is started with \fBstdin\fP connected to the
+master's \fBstdin\fP.  No buffering of \fBstdin\fP can be provided.
+.TP
+\fB\-E\fP
+The \fIclient\fP is started with \fBstderr\fP connected to the
+master's \fBstderr\fP.
+.TP
+\fB\-D\fP
+The \fIclient\fP is launched from the same current working
+directory as the master's.  Really, even if that directory is
+hidden under a mount point.  See \fIfchdir\fP(2).
+.TP
+\fB\-Y\fP
+Change the controlling tty to the new \fIstdin\fP, \fIstdout\fP,
+or \fIstderr\fP (in that order).  See \fItty\fP(4).
+.PP
+These are the inspiration for the \fIescrow\fP wrapper.  I'll even
+claim that \fIxclate\fP is the first true wrapper, and inspired
+all the others.
+
+.SH ENVIRONMENT
+Since \fBxclate\fP is intended to be recursive, a provision is
+made in the processing of environment variables for passing
+options to nested \fBxclate\fP processes.
+.TP
+$xcl_link
+The environment variable \fB$xcl_link\fP is set to the number
+of nested \fBxclate\fP processes presently running.
+
+.TP
+$xcl_1, $xcl_2, ...
+Each manager instance of \fBxclate\fP sets a variable (named for the value
+of $xcl_link established when it started) to the path to the
+unix domain socket used to chat with that instance.
+
+.TP
+$xcl_d
+The path to the unix domain socket for the tightest enclosing instance
+of \fIxclate\fP \fB\-m\fP with \fB\-d\fP in effect.
+
+.TP
+$XCLATE and $XCLATE_1, $XCLATE_2, \fI...\fP
+After reading command line options from variable \fB$XCLATE\fP,
+any master (\fB\-m\fP) process removes it
+from the environment
+(before executing \fIutility\fP in the child process).
+It then installs the variable \fB$XCLATE\fP_\fInesting\fP in its place,
+if it is present in the environment.  This allows header and
+horizontal rule options to be set before they are needed, for
+example before any \fIxapply\fP commands are started.
+.TS
+l l.
+$XCLATE	read by the first manger instance
+$XCLATE_1	read by the children of the first manager
+$XCLATE_1	read by the second manager, if not reset.
+$XCLATE_2	read by the children of the second manager
+\...	and so on...
+.TE
+
+.SH EXAMPLES
+.TP
+\fBxclate\fP \-vV
+Show version information and any details in the present environment.
+.TP
+\fBxclate\fP \-L \e? -V
+Display the table of suffixes supported by \fB\-L\fP, and
+some version information.
+.TP
+\fBxclate\fP \fB\-vm\fP  tasks
+Assuming that the file \fItasks\fP is a shell script that had a list of
+(long running) background jobs in it, for example:
+.nf
+	xclate \-T%x passwd sort /etc/passwd &
+	xclate \-T%x  group sort /etc/group &
+	...
+	wait
+.fi
+The output of this command would be the output of the jobs in some
+order, with each output section contiguous.
+.TP
+\fBxapply\fP \fB\-m\fP \-P5 ...
+Wrap a controlled environment around an \fBxapply\fP process.
+There is some real hoodoo going on here, and you don't want to
+mess with it until you can use \fBxclate\fP very well.
+.TP
+\fBxclate\fP \-m \fBxapply\fP  \-P5 '...  |\fBxclate\fP %u' ...
+This puts the pixie dust on the \fBxapply\fP by hand, and is
+in effect exactly what \fBxapply\fP does under \fB\-m\fP.
+This is akin to making home-made distilled spirits
+(as is one is apt to get blown-up, poisoned, or shot by the law).
+.TP
+\fBxclate\fP \-m \fBxapply\fP \-m \-P6 '...' ...
+Force a new \fBxclate\fP manager into the process tree for this
+instance of \fIxapply\fP.
+Nested instances of \fBxapply\fP share a common manager by default,
+by explicitly starting a new managed stream we can group all the
+output of this \fIxapply\fP together in the common output.
+.TP
+eval chmod 0750 \e${xcl_$xcl_link%/\e*}
+A \fBksh\fP spell to make the present manager socket visible to
+our group.
+.TP
+eval chmod 0750 \e`dirname \e${xcl_$xcl_link}\e`
+The same spell under Borne shell, or csh.
+.TP
+xclate \-\- \-\- ls
+The spell to skip the \fIxid\fP, one double-dash to end
+the options, one to skip the optional \fIxid\fP.
+It is better form to put a meaningful \fIxid\fP on each stream,
+as the default of question-mark ("?") is silly.
+.TP
+xclate \-mr \-N /tmp/log.0 \fIprogram\fP ; tr '\000' '\n' /tmp/log.0
+Run a collated \fIprogram\fP, then replay the exit codes and \fIxid\fP for each task.
+.TP
+.nf
+xclate \-mu /var/run/cheater : >>/var/log/cheater &
+.fi
+Start a persistent diversion on the socket \fB/var/run/cheater\fP.
+Clients that can connect to that socket can write messages
+into \fB/var/log/cheater\fP, until someone issues a client
+with \fB\-Q\fP set.
+.TP
+.nf
+xclate \-m \-i "/etc/motd"  tr '[A\-Z]' '[a\-z]'
+.fi
+A force \fIxclate\fP to open \fB/etc/motd\fP as \fIstdin\fP to
+a tr(1).
+.TP
+.nf
+xclate \-mi "\-" <$DATA xapply \fI...\fP
+.fi
+All child processes of the \fIxapply\fP may try to acquire a file descriptor
+on the $DATA file with "xclate -I".  Note \fBXapply\fP doesn't implement this
+since this option would serialize all of the child processes.
+.TP
+.nf
+xclate \-mi "$SOCK_TMP" nc log.example.com 4321
+.fi
+Use xclate to connect to the local domain socket \fI$SOCK_TMP\fP,
+use that as \fIstdin\fP to a netcat to \fBlog.example.com\fP on
+port 4321.
+.TP
+.nf
+xclate \-mi "$SOCK_TMP" sh -c "exec nc log.example.com 4321 1>&0"
+.fi
+Same as the above, with a duplex connection to force the replies back to
+the UNIX-domain socket.
+Use \fBnc -l -U $SOCK_TMP\fP to create a local end-point
+(in a window).  In another start a network listener with \fBnc -l -p 4321\fP.
+In a third window run the above command on the same host as
+the local end-point, please replace "log.example.com" with the name of
+the host running the listener.  You should be bidirectionally connected
+between the two windows.  An interrupt (^C) in the "nc -l -U" window
+or in the xclate window breaks the connection.
+
+
+.SH BUGS
+This program is very confusing to novice users.  The complex file
+descriptor manipulations lead to cries of pain and massive denial.
+While \fBxclate\fP can be used over the top of a shell, it is
+considered "poor form" to leave one of those just lying around.
+
+.PP
+The "command mode" is more useful (most of the time) with input
+redirected from \fB/dev/null\fP.  This is parallel to the bug where
+ssh (or rsh) reads input it never needs.  There is not a command
+line option to do that, because I think "</dev/null" is clear,
+and sometimes you'd like to input text from your terminal.
+
+.PP
+The options \fB\-O\fP, \fB\-W\fP, and \fB\-N\fP do not truncate
+any file they are told to open, unless you prefix it with a greater-than
+symbol (>), which must be quoted from the shell.
+
+.PP
+The name is a play on "xapply", "escalate" and "collate", and that's
+a bug all by itself.
+
+.PP
+Some programmers are confused when \fIxclate\fP's \fB%s\fP is
+not in sync with \fIxapply\fP's \fB%u\fP, this
+results from 2 root causes: races between subtasks in an \fIxapply\fP
+with a large parallel factor, and races between peer instances of
+\fIxclate\fP managed tasks unrelated to those started by \fIxapply\fP.
+The use of \fB%s\fP, in general, is just to let some applications re-sort
+the collated output as a post-processing filter.
+
+.SH AUTHOR
+Kevin S Braunsdorf
+.br
+NPCGuild.org
+.br
+xclate at ksb.npcguild.org
+
+.SH "SEE ALSO"
+sh(1), csh(1), xapply(1)'s \fB\-m\fP, \fB\-s\fP and \fB\-u\fP options,
+environ(7), mkcmd(1L), cat(1), hxmd(8L), escrow(1L), ptbw(1L), dicer(5),
+nc(1)
+.\" and soon wrapw, escrow

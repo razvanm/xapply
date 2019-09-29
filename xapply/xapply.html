@@ -1,0 +1,865 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML><HEAD>
+<TITLE>xapply -- your best friend</TITLE>
+<link rel="stylesheet" type="text/css" href="/msrc/css/code.css"/>
+</HEAD><BODY>
+<H1 id="known">What you need to know to understand this document</H1>
+This document assumes you are quite familiar with the
+standard UNIX shell, <code class="sh">sh</code>(1), and
+have an understanding of the UNIX&trade; process model, exit codes,
+and have coded several scripts, used <code class="sh">gzip</code>,
+and <code class="sh">find</code>.
+
+<P>
+It also assumes that you can read the manual page for any other
+example command.  It would help a little if you've used
+<code class="libc">printf</code>(3) or some other percent-markup
+function, but it's OK if you've not used any before.
+
+<H1 id="what">What is <code class="sh">xapply</code>?</H1>
+
+Simply stated, <A href="/cgi-bin/manpage.cgi?xapply"><code class="sh">xapply</code></A> is a generic loop.  It iterates
+over items you provide, running a customized shell command for
+each pass though the loop.
+One might code this loop as something like:
+<blockquote class="file"><pre><code >for Item in $ARGV
+do
+	<i>body-part</i> $Item
+done
+</code></pre></blockquote>
+and feel pretty good about it, so why would you need <code class="sh">xapply</code>?
+
+<P>
+The number one reason to use <code class="sh">xapply</code> is that it runs some
+of the <i>body-part</i>'s in parallel.  It starts as many
+as you ask it to (using the <code class="opt">-P</code> option),
+then, as processes finish, it launches the next iteration of
+<i>body-part</i>, until they are all started.
+It waits for the running ones to finish before it exits.
+
+<P>
+The benefit is that we might take advantage of more CPUs resources
+(either as threads on CPU cores, or multiple CPU packages in a host).
+
+<P>
+Even better, it can manage the output from those parallel
+tasks so that each is not all mixed with the others.
+Without the <code class="opt">-m</code> switch <code class="sh">xapply</code> assumes you
+can figure out which iteration of <i>body-part</i> output each line.
+Under the <code class="opt">-m</code> option <code class="sh">xapply</code> groups
+the output from each iteration together,
+such that one finishes completely before the next one starts.
+
+<P>
+Like most loops, <code class="sh">xapply</code> can skip though the list more
+than one item at time.
+The <code class="opt">-<i>count</i></code> option allows you to
+visit the items in the argument list in pairs (or groups of <I>count</I>).
+This is handy for programs like <code class="sh">diff</code> that need two targets.
+
+<P>
+Unlike common loops <code class="sh">xapply</code> keeps track of
+critical resources for each iteration.
+A body can be bound to a token which it uses
+for the life of its task.  That resource token (for example a modem) won't
+be issued to another iteration until the owner-task is complete, then
+it will be allocated to a waiting task.
+This allows <code class="sh">xapply</code> to make very efficient use of
+limited resources
+(and it honors <code class="opt">-P</code> as an upper limit as well).
+
+<P>
+<code class="sh">Xapply</code> has other friends.  In fact it is the core node
+that connects
+<A href="/cgi-bin/manpage.cgi?xclate"><code class="sh">xclate</code></A>, <A href="/cgi-bin/manpage.cgi?ptbw"><code class="sh">ptbw</code></A> and
+<A href="/cgi-bin/manpage.cgi?hxmd"><code class="sh">hxmd</code></A> to each other.
+We'll come back to the usefulness of that fact in a bit.
+
+<P>
+In summary, <code class="sh">xapply</code> lets you take advantage of
+all the CPU resources on a host while keeping the tasks and resources
+straight.
+To raise the overall torque even more it reaches out to share resources,
+to collate output, and reuse configuration data.
+These features are all coordinated across multiple instances of
+<code class="sh">xapply</code> and the related tools.
+
+<H2 id="basic">Basic examples</H2>
+
+The <A href="/cgi-bin/manpage.cgi?gzip"><code class="sh">gzip</code></A>
+utility can be pretty expensive in terms of CPU.
+If we want to compress many output files (say *.txt) we could run
+something like:
+<blockquote class="file"><pre><code >gzip -9 *.txt
+</code></pre></blockquote>
+
+<P>
+Most modern hosts have more than the <em>single CPU</em> that is going to use.
+We might break the list up with some shell magic (like <code class="sh">split</code>(1))
+then start a copy of <code class="sh">gzip</code> for each file.
+That won't balance the CPUs as one list will inevitably
+have most of the small files.
+This short list finishes long before the others leaving an idle
+CPU with files left to compress.
+<P>
+The shell code to split the list up is also pretty complex.
+Given a temporary file, it might look like this:
+<blockquote class="file"><pre><code >/bin/ls -1 *.txt &gt;$TMP_FILE
+LINES=`wc -l &lt;$TMP_FILE`
+split -l $((LINES/4+1)) $TMP_FILE $TMP_FILE,
+for Start in $TMP_FILE,*
+do
+	xargs gzip -9 &lt;$Start &amp;
+done
+wait
+rm $TMP_FILE $TMP_FILE,*
+</code></pre></blockquote>
+<P>
+With <code class="sh">xapply</code>, we can keep 4 processes running in parallel with:
+<blockquote class="file"><pre><code >xapply <em class="new">-P4</em> "gzip -9" *.txt
+</code></pre></blockquote>
+That will keep our machine busy for a while!  If there are less than 4
+files we just start as many as we can.  More than that will queue until
+(the smallest or first) one finishes, then start another.  This actually
+sustains a load average on my test machine right at 4.0.
+The <code class="sh">xapply</code> process itself is blocked in the <code class="sh">wait</code>
+system call and therefore uses no CPU, until it is ready to start another
+task.
+
+<P>
+In some cases the list of files might be too long for an argument list.
+We can provide the arguments on <I>stdin</I> (or from a file)
+with the <code class="opt">-f</code> switch to <code class="sh">xapply</code>:
+<blockquote class="file"><pre><code >find . -name \*.txt -print |
+xapply <em class="new">-f</em> -P4 "gzip -9" <em class="new">-</em>
+</code></pre></blockquote>
+This is also good because it won't try to compress
+a file named "*.txt" in the case where the glob doesn't match
+anything.
+The other great thing about that is that the first <code class="sh">gzip</code>
+task starts as soon as <code class="sh">find</code> can send the first
+filename though the pipe!
+<P>
+When <code class="sh">find</code> has queued enough files to block on
+the pipe it gives up the CPU to the <code class="sh">gzip</code>s,
+which is exactly what you want.  Just before that there are actually
+5 tasks on the CPU, which is OK as <code class="sh">find</code> is largely
+blocked on I/O while <code class="sh">gzip</code> is busy on the CPU.
+
+<H2 id="inout">I/O features -- input</H2>
+
+Under UNIX's nifty pipe abstraction it is best to think of
+<code class="sh">xapply</code> as a filter, reading from <i>stdin</i> and writing
+to <i>stdout</i>, like <code class="sh">awk</code> would.  We'll see in the custom
+command section that this is closer to the truth than it looks.
+For now just play along.
+
+<P>
+Because of the parallel tasks <code class="sh">xapply</code> has some unique
+issues with I/O.
+
+<P>
+On the input side we have issues with processes competing for input
+from <i>stdin</i>.  We take several measures to keep the books balanced.
+<DL>
+<DT>the <code class="opt">-<i>count</i></code> switch and <i>stdin</i>
+<DD>
+This <code class="sh">xapply</code> command folds input lines 1 and 2 to a single line,
+then 3 and 4, then 5 and 6 -- and so on to the end of the file:
+<blockquote class="file"><pre><code >xapply -f <em class="new">-2</em> 'echo' <em class="new">- -</em>
+</code></pre></blockquote>
+The two occurrences of <i>stdin</i>, spelled dash "<b>-</b>" like most
+UNIX filters, share a common reference.  That is the code knows to
+read one thing from <i>stdin</i> for each dash, for each iteration,
+rather than reading all of <i>stdin</i> for the first dash leaving
+nothing for the second.
+<P>
+In other words it does what you'd expect.  Using <code class="opt">-3</code> and
+three dashes reformats the output to present 3 lines as a single output
+line.
+<DT>speaking in terms of lines
+<DD>
+Sometimes newline is not a good separator. <code class="sh">Find</code>
+has the <code class="opt">-print0</code> option for just this reason.
+<code class="sh">Xapply</code> has the <code class="opt">-z</code> option to read
+<code class="opt">-print0</code> output.  Some other programs, like
+<A href="../../sbin/hxmd/hxmd.html"><code class="sh">hxmd</code></A>,
+also use the <A href="/cgi-bin/manpage.cgi?ascii&amp;7"><code class="sh">nul</code></A> terminated format.
+<P>
+So the compress example might become:
+<blockquote class="file"><pre><code >find . -name \*.txt -print0 |
+xapply -f<em class="new">z</em> -P4 "gzip -9" -
+</code></pre></blockquote>
+<DT>the command line option <code class="opt">-i <I>input</I></code>
+<DD>
+This option opens a different file as the common <i>stdin</i> for
+all the inferior tasks.
+Under <code class="opt">-f</code> the default value is <code class="path">/dev/null</code>.
+This lets the parent <code class="sh">xapply</code> use <i>stdin</i> for
+input without random child processes consuming bits from it.
+<P>
+To provide a unique word from <code class="path">$HOME/pass.words</code> to
+each of 5 tasks:
+<blockquote class="file"><pre><code >xapply <em class="new">-i $HOME/pass.words</em> 'read U &amp;&amp; echo %1 $U' 1 2 3 4 5
+</code></pre></blockquote>
+This has some limits, when the file is too short for the number of tasks
+the <code class="sh">read</code> will fail and
+the echo won't be executed.  (Put 3 words in the
+file and try it.)  We might want to recycle the words after they've been
+used, see below where we explain how
+<A href="#tags"><code class="opt">-t</code> does that</A>.
+<P>
+Since the <code class="sh">read</code> is part of a program it could be part of
+a loop, so a variable number of words from the <i>input</i> file could
+be read for each task.  Under <code class="opt">-P</code> this could be problematic.
+</DL>
+
+<H2 id="output">I/O features -- output</H2>
+
+Without the <code class="opt">-m</code> option, <code class="sh">xapply</code> tasks each
+send output to <i>stdout</i> all jumbled together.  This is not
+evident until you try a large <code class="opt">-P<i>jobs</i></code> case with
+a task that outputs over time (like a long running <code class="sh">make</code>).
+If you want an example of this you might compare:
+<blockquote class="file"><pre><code >xapply -P2 -J4 'ptbw -' '' ''
+</code></pre></blockquote>
+to the collated version:
+<blockquote class="file"><pre><code >xapply <em class="new">-m</em> -P2 -J4 'ptbw -' '' ''
+</code></pre></blockquote>
+
+<P>
+The <code class="sh">xclate</code> processor is <code class="sh">xapply</code>'s output
+friend.  It is not usually your friend, as it is hard to follow all
+the rules.  In fact some programs, like <code class="sh">gzip</code>, don't
+follow the rules very well.
+You'll have to compensate for that in
+your <code class="sh">xapply</code> spells.
+
+<P>
+In our example above we'd like to add the <code class="opt">-v</code> switch to
+<code class="sh">gzip</code> to see how much compression we are getting
+<blockquote class="file"><pre><code >find . -name \*.txt -print0 |
+xapply -fz -P4 "gzip -9 <em class="new">-v</em>" -
+</code></pre></blockquote>
+Which looks OK, until you run it.  The start of all the compression
+lines come out all at once (the first 4 of them), then the statistics
+get mixed up with the new headers as they are output.  It is a mess.
+
+<P>
+By adding the <code class="opt">-m</code> switch to the xapply we should be
+able to collate the output.  However it <em class="error">doesn't work</em> because
+the statistics are sent to <i>stderr</i>, so we must compensate with
+the addition of a shell descriptor duplication:
+<blockquote class="file"><pre><code >find . -name \*.txt -print0 |
+xapply -fzm -P4 "gzip -9 <em class="new">-v 2&gt;&amp;1</em>" -
+</code></pre></blockquote>
+
+<P>
+The logic in <code class="sh">xapply</code> to manage <code class="sh">xclate</code> is
+usually enough for even nested calls.  When it is not you'll have
+to learn more about <code class="sh">xclate</code>, I'd save that for a major
+rain storm, or long trip on a plane.
+
+<P>
+The <code class="sh">xapply</code>'s command line option <code class="opt">-s</code> passes
+the squeeze option (also spelled <code class="opt">-s</code>) down
+to <code class="sh">xclate</code>.  This option allows any task which
+doesn't output any text to <i>stdout</i> to exit without
+waiting for exclusive access to the collated output stream.
+This speeds the start of the next task substantially in cases
+where output is rare (and either long, or evenly distributed).
+
+
+<H2 id="expander">Building a custom command</H2>
+
+The old-school UNIX command <A href="/cgi-bin/manpage.cgi?apply"><code class="sh">apply</code></A> uses a printf-like percent expander to
+help customize commands.  As a direct descendant of <code class="sh">apply</code>,
+<code class="sh">xapply</code> has a similar expander.
+As one of my tools it has a lot more power in that expander.
+
+<P>
+In addition to the <code class="sh">apply</code> feature of binding <code class="markup">%1</code> to the
+first parameter, <code class="markup">%2</code> to the second, and so forth,
+<code class="sh">xapply</code> has access a facility called the
+<A href="../../lib/explode/dicer.html">dicer</A>.
+
+<P>
+The dicer is a shorthand notation used to pull substrings out of
+a larger string with a known format.  For example a line in the
+<A href="/cgi-bin/manpage.cgi?passwd&amp;5"><code class="path">/etc/passwd</code></A> file has a well-known format which uses
+colons (":") to separate the fields.  In every password file
+I've ever seen the first field is the login name of the account.
+The <code class="sh">xapply</code> command
+<blockquote class="file"><pre><code >xapply -f 'echo <em class="new">%[1:1]</em>' /etc/passwd
+</code></pre></blockquote>
+filters the <code class="path">/etc/passwd</code> file into a list of login names.
+<P>
+The dicer expression <code class="markup">%[1:1]</code> says "take the first parameter,
+split it on colon (:) then extract the first subfield".
+Here are several possible dicer expressions and their expansions:
+
+<blockquote><table summary="Example expansions">
+<TR><TH>Expression</TH><TH>Expansion</TH></TR>
+<TR><TD>%1</TD><TD>/usr/share/man/man1/ls.1.gz</TD></TR>
+<TR><TD>%[1/2]</TD><TD>usr</TD></TR>
+<TR><TD>%[1.1]</TD><TD>/usr/share/man/man1/ls</TD></TR>
+<TR><TD>%[1.1].%[1.2]</TD><TD>/usr/share/man/man1/ls.1</TD></TR>
+<TR><TD>%[1/$.1]</TD><TD>ls</TD></TR>
+</table></blockquote>
+
+I stuck a nifty one in there, the dollar sign always stands for the
+last field.  The other important point is that <code class="markup">%[1/1]</code>
+would expand to the empty string, since the first field is empty.
+<P>
+The dicer also lets us <em>remove</em> a field with a negative
+number:
+<blockquote><table summary="Removing fields">
+<TR><TH>Expression</TH><TH>Expansion</TH></TR>
+<TR><TD>%1</TD><TD>/usr/share/man/man1/ls.1.gz</TD></TR>
+<TR><TD>%[1/-1]</TD><TD>usr/share/man/man1/ls.1.gz</TD></TR>
+<TR><TD>%[1/-2]</TD><TD>/share/man/man1/ls.1.gz</TD></TR>
+<TR><TD>%[1.-$]</TD><TD>/usr/share/man/man1/ls.1</TD></TR>
+</table></blockquote>
+
+<P>
+Because splitting on white-space is so common, the blank
+character is special in that it matches any number of white-space
+characters.  Escape any of blank, a digit, close-bracket, or
+backslash with a backslash to force it to be taken literally.
+
+<P>
+Later versions of <code class="sh">xapply</code> also allow access to the
+<em class="new">mixer</em> which allows the selection of characters from a
+dicer expression.  That is slightly beyond the scope of
+this document.  As an example, <code class="markup">%(3,$-1)</code> is the
+expression to reverse the characters in <code class="markup">%3</code>.
+All these tools use the same <i>mixer+dicer</i> expression syntax:
+<code class="sh">xapply</code>, <code class="sh">mk</code>, and <code class="sh">sbp</code>.
+
+<H2 id="prefs">Preferences for the picky coder</H2>
+
+There are some options that let you select details about the environment
+that <code class="sh">xapply</code> provides: viz. shells, escape characters, and padding.
+
+<H3 id="shell">I like to use perl</H3>
+
+The <code class="opt">-S <i>shell</i></code> option lets you select a shell for
+the command built to start each task.  I would use <code class="sh">ksh</code> or
+<code class="sh">sh</code> if it were me.  You <em>could</em> set <code class="env">$SHELL</code>
+to anything you like, but that might confuse other programs that use
+<code class="sh">xapply</code>, so stick to <code class="opt">-S</code>.
+<P>
+As a special case when you set <code class="opt">-S <i>perl</i></code>
+it changes the behavior of <code class="sh">xapply</code>.
+To introduce the command string
+it uses <code class="sh">perl -e</code> rather than the Bourne shell
+compatible <code class="file">$SHELL -c</code>.
+It might also setup <code class="opt">-A</code> differently (see below).
+
+<H3 id="pad">Input file padding</H3>
+
+Given a <i>count</i> of 2 and 2 <i>file</i> parameters under <code class="opt">-f</code>,
+<code class="sh">xapply</code> matches the corresponding lines from each file as
+parameter pairs.  When only one of the files runs out of lines the
+empty string is provided as the element from the other.  You can change this
+<i>pad</i> string to anything you like, for example <code class="opt">-p /dev/null</code>.
+
+<P>
+In one of our first examples we joined pairs of lines.  What happens if
+there is only 1 line?  The echo command gets an extra space on the end,
+which it trims.  To see that we can replace the default expansion with
+a quoted one, and run it through <code class="file">cat -v</code>:
+<blockquote class="file"><pre><code >echo A |xapply -f -2 'echo <em class="new">"%*"</em>' - - <em class="new">| cat -ve</em>
+</code></pre></blockquote>
+This outputs "A $" (without the quotes).
+<P>
+There are alternatives.  Under <code class="opt">-p</code> we can detect a
+sentinel value in for missing line.  Say, for example, that a comma on
+a line by itself could never be an element of the input, then
+<code class="opt">-p .</code> would let us detect the missing even line with
+<blockquote class="file"><pre><code >xapply <em class="new">-p ,</em> <i>...</i> if [ _"%2" = _"<em class="new">,</em>" ] ; then <i>...</i>'
+</code></pre></blockquote>
+
+<P>
+It is usually considered <strong>good form</strong> to exit from task
+as soon as possible.  With this in mind the above trap might be better
+coded as:<br>
+<blockquote class="file"><pre><code ><i>...</i> [ _"%2" = _"," ] <em class="new">&amp;&amp; exit;</em> <i>...</i>'
+</code></pre></blockquote>
+
+<H3 id="markup">Percent marks are so vulgar</H3>
+
+If you don't like the escape character you can change it with the
+<code class="opt">-a</code> option.  Take care that the symbol you pick is quoted
+from the shell.
+Viz. "<code class="sh">xapply <em class="new">-a</em> <em class="new">~</em> </code> ..." is not what you'd want under
+<code class="sh">csh</code> or <code class="sh">ksh</code>, since the tilde gets expanded to a
+path to someone's home directory.
+<P>
+Because <code class="sh">xapply</code> is driven from <code class="sh">mkcmd</code> it takes
+the full list of character expressions (<code class="opt">-a "^B"</code> is
+ASCII <code class="param">stx</code>, <code class="opt">-a M-A</code> is code 230), that
+doesn't mean you should use them.  Try to stick with percent if you can.
+In <code class="sh">ksh</code> that makes some <code class="sh">let</code>,
+<code class="file">$((<i>...</i>))</code>, and ${<i>NAME</i>%<i>glob</i>}
+parameter substitutions require <em class="new"><code class="markup">%%</code></em> to
+get a literal percent sign.
+
+<H2 id="advexpander">More advanced escapes</H2>
+
+Since <code class="sh">xapply</code> is emulating a generic loop it stands
+to reason that there would be a "loop counter".
+The loop counter is
+named <code class="markup">%u</code>, which stands for "unique".
+Since I'm a C programmer, I start the loop counter at zero (0) and
+bump it up one for each trip through the loop.
+
+<P>
+For example to output the numbers 0 to 4 next to the letter 'A' to 'E':
+<blockquote class="file"><pre><code >xapply 'echo <em class="new">%u</em> %1' A B C D E
+</code></pre></blockquote>
+
+<P>
+A better use of this might be to process data from one iteration to
+the next (making generations of a file with the extension <code class="markup">.%u</code>).
+
+<P>
+Use of the <code class="sh">ksh</code> built-in math operations to build a
+function based on <code class="markup">%u</code> is common.  To queue many
+<code class="sh">at</code> jobs about 5 minutes apart:
+<blockquote class="file"><pre><code >xapply -x 'at + <em class="new">$((%u*5))</em> minutes &lt; %1' *.job
+</code></pre></blockquote>
+The <code class="opt">-x</code> option lets you see the commands executed on <i>stderr</i>.
+This emulates <code class="sh">set -x</code> in Bourne shell.
+<!--
+Alternatively <code class="opt">-n</code> would show you the commands on <i>stdout</i>
+<strong>and not run them</strong>.  This option is going away in the next
+release, <code class="opt">-n</code> and
+<code class="opt">-v</code> interact badly with <code class="opt">-t</code>.
+-->
+
+<H2 id="shquote">Safer escapes</H2>
+
+Say one of the input names to the command below is
+"Paul d`Abrose".
+<blockquote class="file"><pre><code >xapply -f -2 'Mail -s "Hi %1" "%2" &lt;greeting.mail' names.cl address.cl
+</code></pre></blockquote>
+That will expand an unbalanced grave quote in the subject argument.
+Even worse we might try to run "Abrose" as a shell command.
+
+<P>
+A program should be safe from such corner cases, like a filename with
+a quote or control character in the name.  On input <code class="sh">xapply</code>
+can use the <code class="opt">-print0</code>-style, on output we depend on the shell.
+To make a parameter safer there is a
+<code class="markup"><em class="new">q</em></code> modifier that
+tells <code class="sh">xapply</code>
+that you are going to wrap the expansion in shell double-quotes, and that
+you'd like the resulting dequoted text to be the original value.
+
+<P>
+By spelling the expansion as:
+<blockquote class="file"><pre><code >xapply -f -2 'Mail -s "Hi %<em class="new">q</em>1" "%<em class="new">q</em>2" &lt;greeting.mail' names.cl address.cl
+</code></pre></blockquote>
+We're asking <code class="sh">xapply</code> to backslash any of double-quote, grave,
+dollar, or backslash in the target text, so the command is presented to
+the shell as:
+<blockquote class="file"><pre><code >Mail -s "Hi <em class="new">Paul d\`Abrose</em>" "pa@example.com"...
+</code></pre></blockquote>
+
+<P>
+This is not always enough, sometime the data should be passed through
+a scrubber, or sent to <code class="path">/dev/null</code>, if you don't trust it.
+
+<H3 id="markup-plus">Nested markup</H3>
+
+If you really want to get a crazy you can pass more markup in as
+a parameter.  The escape <code class="markup">%+</code> shifts the
+parameters over one to the left, then expands
+the new <code class="param">cmd</code> (replacing the
+<code class="markup">%+</code>) then continues with the rest of
+the original <code class="param">cmd</code>.
+<P>
+And example makes this a little clearer:
+<blockquote class="file"><pre><code >xapply -n -2 "( <em class="new">%+</em> )" "echo %1 %1" ksb rm /tmp/bob
+</code></pre></blockquote>
+Outputs
+<blockquote class="file"><pre><code >( echo ksb ksb )
+( rm /tmp/bob )
+</code></pre></blockquote>
+
+<P>
+This is really a lot more useful with the input is a pipe
+(viz. under <code class="opt">-fz</code>).
+A program can match commands to parameters and send the
+paired stream to <code class="sh">xapply</code>
+for parallel execution.
+This is exactly how <code class="sh">hxmd</code> works.
+
+<H2 id="none">What if I didn't find anything to do?</H2>
+
+In most cases if <code class="sh">xapply</code> didn't get any arguments to use
+as parameters it shouldn't run anything (unlike busted <code class="sh">xargs</code>).
+In a few cases it might be nice to have an "else" part (like a Python
+<code class="sh">while</code> loop).  The <code class="opt">-N <i>else</i></code> option allows
+a command to run when we didn't get any tasks started.
+<P>
+Let's rework our compression filter, we'll misspell the extension we
+are looking for (so we don't match anything) and put in a message
+when we do not find anything to compress.
+<blockquote class="file"><pre><code >find . -name \*.<em class="error">text</em> -print0 |
+	xapply -fzm -P4 <em class="new">-N "echo nothing to compress 1&gt;&amp;2""</em> "gzip -9 -v 2&gt;&amp;1" -
+</code></pre></blockquote>
+
+<P>
+This is mostly used in scripts to give the Customer a warm feeling that
+we looked, but didn't find anything to do.
+
+
+<H2 id="tags">Other resources</H2>
+
+In all the examples above <code class="sh">xapply</code> is very predictable.
+When we run the examples on the same input, we are apt to get the same
+output.  All that changes when we allow <code class="sh">xapply</code> to
+start a <code class="sh">ptbw</code> to manage a resource.
+
+<P>
+Each line of a <code class="sh">ptbw</code> resource file represents a
+unique resource that is allocated to a task.
+A resource could be <strong>anything</strong>, a CPU, filesystem,
+VX disk group or network address.  I picked a modem in these
+examples because the exclusive use to dial a phone number is clear.
+
+<P>
+If we have 3 modems connected to a host
+on <code class="path">/dev/cuaa0</code>, <code class="path">/dev/cuaa1</code>, and
+<code class="path">/dev/ttyCA</code> we can put those strings in a file
+called <code class="path">~/lib/modems</code>.  Then we can ask <code class="sh">xapply</code>
+to reserve 1 modem for each command:
+<blockquote class="file"><pre><code >xapply -f <em class="new">-t ~/lib/modems</em> -R 1 'myDialer -d <em class="new">%t1</em> %1' phone.list
+</code></pre></blockquote>
+No matter how many phone numbers are in <code class="path">phone.list</code> we
+will never try to dial different numbers on the same modem.
+This is because <code class="sh">xapply</code> and <code class="sh">ptbw</code> know how
+to work with each other to keep the books straight.
+
+
+We can force a new <code class="sh">ptbw</code> instance into our
+process tree by using the <code class="opt">-t</code> option, the <code class="opt">-J</code>,
+or a <code class="opt">-R</code> option with any value greater than 0.
+If we don't use any of those options <code class="sh">xapply</code> uses
+the internal function <code class="markup">iota</code> just as <code class="sh">ptbw</code>
+does, but doesn't insert an instance in the process tree, so any
+enclosing <code class="sh">ptbw</code> will be directly visisble to each task.
+
+<P>
+The new expander form <code class="markup">%t1</code> expands to the modem selected.
+The <code class="opt">-R</code> options specifies how many resources to allocate
+to each task.
+
+<P>
+All of the dicer forms we saw above might be applied to a resource:
+given that <code class="markup">%t1</code> expands to <code class="path">/dev/cuaa1</code>:
+<table summary="Resource expansion">
+<TR><TH>Expression</TH><TH>Expansion</TH></TR>
+<TR><TD>%t[1/$]</TD><TD>cuaa1</TD></TR>
+<TR><TD>%t[1/-$]</TD><TD>/dev</TD></TR>
+<TR><TD>%t[1.-$]</TD><TD>/dev/cuaa1</TD></TR>
+</table>
+
+<P>
+If we use the resource to allocate CPUs we might want to get
+more than one to a task.  In that case we can tell <code class="sh">ptbw</code>
+to just bind unique integers as the resources.  On a 16 CPU machine
+we could divide the host into 5 partition of 3 CPUs:
+<blockquote class="file"><pre><code >xapply <em class="new">-J5 -R3</em>  -f -P5 'myWorker <em class="new">%t*</em>' task.cl
+</code></pre></blockquote>
+The <code class="opt">-J5 -R3</code> is passed along to <code class="sh">ptbw</code> to
+build a tableau that is five by three, then <code class="sh">xapply</code>
+consults that to allocate resources.  The <code class="markup">%t*</code> passes
+the names of the CPUs provided down to <code class="sh">myWorker</code>.
+
+<H2 id="xclateChan">Ways to access data from <code class="sh">xapply</code> in <code class="sh">xclate</code></H2>
+
+Some programs need to send data through the <A href="/cgi-bin/manpage.cgi?environ&amp;7">environment</A> to descendent processes.
+The <code class="opt">-e</code> <code class="param">var</code>=<code class="param">dicer</code> option allows any
+environment variable to be set to a dicer expression.
+
+<P>
+To specify the modem in <code class="env">$MODEM</code> (rather than in an option):
+<blockquote class="file"><pre><code >xapply -f <em class="new">-t ~/lib/modems</em> -R 1 <em class="new">-e "MODEM=%t1"</em> 'myDialer %1' phone.list
+</code></pre></blockquote>
+
+<P>
+This is also really useful to send options down to <code class="sh">xclate</code> in
+<code class="env">XCLATE_1</code> to set headers and footers on collated output.
+<blockquote class="file"><pre><code ><em class="new">XCLATE_1='-T "loop %{L}"'</em> xapply -m -e L=%u 'echo' A B C
+</code></pre></blockquote>
+For more on the use of <code class="env">XCLATE_<i>n</i></code> see the
+<A href="../xclate/xclate.html">xclate HTML document</A>.
+
+<P>
+Here is why <code class="sh">xapply</code> has to set the variable; the <code class="sh">xclate</code>
+output filter is launched as a peer process to the <code class="sh">echo</code> command,
+so changing <code class="env">$L</code> in the command won't give it a new value
+in the (already running) process.  We can't set it in the parent shell
+as it won't change for each task, so <code class="sh">xapply</code> needs to be able
+to set it.
+
+<H3 id="percentU2">Another way to access %u</H3>
+
+The option <code class="opt">-u</code> forces <code class="sh">xapply</code> to pass the value
+of <code class="markup">%u</code> to any output <code class="sh">xclate</code> as the <i>xid</i>.
+Using that the above example becomes
+<blockquote class="file"><pre><code >XCLATE_1='-T "loop <em class="new">%x</em>"' xapply -m <em class="new">-u</em> 'echo' A B C
+</code></pre></blockquote>
+but that's not the reason this option exists.
+
+<P id="codes">
+When another processor (say <code class="sh">hxmd</code>) wants to know which of
+several tasks has completed it can call <code class="sh">xapply</code> with
+<code class="opt">-u</code> and <code class="sh">xclate</code> with <code class="opt">-N <i>notify</i></code>.
+Then <code class="sh">xclate</code> reports the completion of each task with
+the number of the task as the <code class="param">xid</code> on the resource
+given to <code class="opt">-N</code>.
+
+<P>
+This makes <code class="sh">xapply</code> an excellent "back-end" program to manage
+parallel tasks, although it works best from a C or perl program.
+Here is an example where we use notify to
+show the order of complete tasks:
+<blockquote class="file"><pre><code >xclate -m <em class="new">-N '|tr -u \\000 \\n|while read N; do echo fini $N; done'</em> -- \
+		xapply -m -u -P5 'sleep' 3 2 5 2 3
+</code></pre></blockquote>
+It would be sad if we couldn't get the exit code from each task,
+but we can.
+Try that same with a <code class="opt"><em class="new">-r</em></code>
+switch passed to <code class="sh">xclate</code>.
+The two numbers are the exit status, and the xid.
+
+<p>
+Also try both of those without
+the <code class="opt">-u</code> option to <code class="sh">xapply</code>, in
+one case you get the number of the task, in the other the number of
+seconds slept (which is the value of <code class="markup">%1</code>).
+
+<P>
+The observant student might think
+this looks like it was designed to be given as input to an instance
+of <code class="sh">xapply -fz</code>.
+Another possible use is <code class="sh">hxmd</code>'s retry logic.
+
+<P>
+One last corner case: the <code class="opt">-r</code> output for <code class="opt">-N</code>'s
+command is encoded as task "00".  Thus it is distinguishable, as a
+string, from the first task (given as "0").  The is the same hack
+the new <code class="sh">rmt</code> program uses to tell the client it has
+a new more advanced command set. <!-- I've always liked that meme - ksb -->
+
+
+<H2 id="ptbw">Looks like <code class="sh">ptbw</code> to me</H2>
+
+The <code class="sh">ptbw</code> program allows a shorthand to
+access the recovered
+resources as shell positional parameters.  For historical reasons this
+option is also provided by <code class="sh">xapply</code>.  In the <code class="sh">xapply</code>
+case the shell parameters (<code class="env">$1</code>, <code class="env">$2</code>, <i>...</i>) become
+run-time versions of the expander names (<code class="markup">%t1</code>, <code class="markup">%t2</code>, <i>...</i>).
+
+<P>
+That makes our command line modem example look like:
+<blockquote class="file"><pre><code >xapply -f -t ~/lib/modems -R 1 <em class="new">-A</em> 'myDialer -d <em class="new">$1</em> %1' phone.list
+</code></pre></blockquote>
+We don't have to specify a <code class="opt">-e MODEM</code>, we can just for
+the name into <code class="env">$1</code> and use it from there.  This even works
+when the <code class="opt">-S</code> option selects
+<code class="sh">perl</code> as the shell, or
+even worse <code class="sh">tcsh</code>.
+
+<p>
+See the <A href="../ptbw/ptbw.html">ptbw HTML document</A> for more ideas
+about how to setup resource pools and using them from the command-line
+and from scripts.
+
+<h2 id="coProc">Using <code class="sh">xapply</code> as a co-process</h2>
+
+A co-process allows multiple shell pipelines to share a common data
+source or data sync.  This is a very powerful construct in scripts,
+which is often used to reduce common code and focus multiple data sources
+into a single pipeline.
+See the <code class="sh">ksh</code>
+<A href="/cgi-bin/manpage.cgi?ksh">manual page</A>
+under Co-Processes if you've never heard of thise before.
+
+<P>
+Because of the way <code class="sh">xapply</code> is designed
+it makes a really great co-process.  It manages a list of tasks
+given to it on <code class="markup">stdin</code>, and outputs a list
+of results on <code class="markup">stdout</code> -- which is exactlty
+what a co-process service should do.
+
+<p>
+For a real turbo let's start our <code class="sh">gzip</code> loop
+as a co-process in a fair mockup of a workstation dump structure.
+
+<P>
+Say we want to dump many workstations in parallel to a large file server.
+We are going to <code class="sh">ssh</code> to each client to run
+<code class="sh">dump</code>(8) over a list of filesystems.
+But we need to limit the impact to each workstation owner's
+desktop, so let's run the compression for the files
+locally on the file server.  For a start I'm going to assume
+that the file server can run at least 4 processes at a time.
+
+<P>
+I'm going to simplify the code a little to show the inner loop
+for a single host here.
+We'll start a co-process that keeps 3 <code class="sh">gzip</code> tasks
+running.  To do that it reads the names
+of the files to compress from <code class="markup">stdin</code>, so
+the main script outputs each completed dump archive to the co-process
+with <code class="sh">print -p</code>, if it is marked in the list
+as "<code class="markup">gzip</code>".  After all the hosts are
+finished we close the co-processes input, then <code class="sh">wait</code> for
+it to finish.
+
+<blockquote class="file"><pre><code >#!/bin/ksh
+# comments and some argument processing
+: ${SSH_AUTH_SOCK?'must have an ssh agent to run automated backups'}
+unset TAPE RMP RSH
+...
+<em class="new">nice xapply -P3 -f 'gzip -7v %1 1&gt;&amp;3 2&gt;&amp;3' - 3&gt;gzip.log |&amp;</em>
+...
+for $TARGET in ... ; do
+	...
+	while read FS WHERE COMPRESS junk ; do
+		ssh root@$TARGET -x -n su -m operator -c "'/bin/sync; exec /sbin/dump -0uL -C16 -f - $FS'" >$WHERE.dump
+		[ _${COMPRESS:-no} = _gzip ] &amp;&amp; <em class="new">print -p $WHERE.dump</em>
+	done <<-\!
+/	slash	gzip
+/var	var	gzip
+/usr	usr	gzip
+/home	home	gzip
+/var/ftp var_ftp no
+...
+!
+done
+<em class="new">exec 3&gt;&amp;p;exec 3&gt;&amp;-
+wait</em>
+# cat gzip.log
+exit 0
+</code></pre></blockquote>
+
+<P>
+In the real code we run several hosts in parallel.  Also the list of
+target filesystems is not from a here document: but that would be
+much harder to explain here.  I put in a comment where one might
+display (or process) the log from all the <code class="sh">gzip</code>
+processes.  This might be used to feed-back and tune the compression
+levels or exclude dumps that grow when compressed (viz. compressed tar files
+tend to do that from <code class="path">/var/ftp</code>.
+
+<P>
+The reason this is a good structure is that the number of compression
+tasks is controlled with a single <code class="opt">-P3</code>
+specification: when we move the process to an newer host we can tune it
+up to use most of the CPU, saving just enough to run <code class="sh">ssh</code>
+to fetch backups from our client hosts.  In the production script
+the parallel factor is a command-line option, and the outer loop also
+processes multiple client hosts in
+parallel with <code class="sh">xapply</code>.
+
+<p>
+Conversely when we need more resources for the incoming dump streams we
+can reduce <code class="opt">-P</code>, or
+tune the <code class="sh">nice</code> options to
+focus more effort on the <code class="sh">ssh</code> encryption tasks.
+And to simplify the code we could use a pipeline to compress the dumps
+as they stream in from the client, but that slows down the over-all
+thoughtput of the process to the speed of the backup host, which may
+have more disks than brains.
+
+<H3 id="coProc2">Another co-process example, from your shell</H3>
+If you run <code class="sh">xapply</code> as a co-process you might look at
+a <code class="sh">pstree</code> (aka. <code class="sh">ptree</code>) of
+the processes doing the work.  What you should see is the peer
+instance of <code class="sh">xapply</code> with some workers below it,
+and sometimes a <code class="markup">defunct</code> process or two
+waiting to be reaped.  These don't hurt anything, it is just the way
+<code class="sh">xapply</code> blocks reading input before it checks
+for finished tasks.  Here is a simple example, using your own
+<code class="sh">ksh</code> as the master proceess.
+
+<blockquote class="file"><pre><code >$ nice xapply -f -P3 'sleep %1; date 1&gt;&amp;3' - 3>log.$$ |&amp;
+$ jobs
+[1] + Running              nice xapply -P3 -f "sleep %1; date 1&gt;&amp;3" - 3>
+$ print -p 10
+$ ptree -n $$
+1380  ksh -i -o vi -o viraw
+  31057 xapply -P3 -f sleep %1; date 1&gt;&amp;3 -
+    31058 /bin/ksh -c sleep 10; date 1&gt;&amp;3 _
+      31063 sleep 10
+    31059 ptree -n 1380
+$ print -p 20 ; print -p 22 ; print -p 21
+$ ptree -n $$
+1380  ksh -i -o vi -o viraw
+  31148 xapply -P3 -f sleep %1; date 1&gt;&amp;3 -
+    31149 /bin/ksh -c sleep 20; date 1&gt;&amp;3 _
+      31161 sleep 20
+    31150 /bin/ksh -c sleep 22; date 1&gt;&amp;3 _
+      31163 sleep 22
+    31152 /bin/ksh -c sleep 21; date 1&gt;&amp;3 _
+      31162 sleep 21
+  31164 ptree -n 1380
+$ sleep 30
+$ ptree -n $$
+1380  ksh -i -o vi -o viraw
+  31148 xapply -P3 -f sleep %1; date 1&gt;&amp;3 -
+    31150 ()
+    31152 ()
+  31168 ptree -n 1380
+$ exec 4&gt;&amp;p ; exec 4&gt;&amp;-
+[1] + Done                 nice xapply -P3 -f "sleep %1; date 1&gt;&amp;3" - 3>
+$ wc -l log.$$
+       4 log.1380
+$ rm log.$$</code></pre></blockquote>
+<P>
+The reason we see 2 exited children under
+the co-process <code class="sh">xapply</code>
+is that <code class="sh">xapply</code> was blocked waiting for a child to
+<code class="libc">exit</code> until one did (to free up a slot), then it
+noticed that there were no more tasks to launch (when we moved and closed the
+<code class="markup">p</code> descriptor).  So it waited for the
+other childern then <code class="libc">exit</code>'d itself.
+
+<P>
+Always remember that the co-process can be an entire pipeline, which is
+better than <strong>just</strong> a single <code class="sh">xapply</code>.
+I use the <code class="sh">nice</code> to start my co-processes command
+and the <code class="sh">|&amp;</code> to end it as
+structural documentation in the script.
+
+<P>
+The <code class="sh">nice</code> also puts the main script at an advantage,
+but you could do the opposite and use <code class="sh">op</code> (or
+<code class="sh">sudo</code>) to get better scheduling priority,
+a different effective uid, or some other escalation for
+the co-process.  If you need the exit codes from the processes see
+<A href="#codes">a note above</A> about using
+a wrapped <code class="sh">xclate</code> to do that.
+
+<H2 id="common">Like any of ksb's tools</H2>
+
+Every one of my tools should take <code class="opt">-V</code> to output a useful
+version banner, and <code class="opt">-h</code> to output a brief on-line help
+message.  So <code class="sh">xapply</code> does.
+
+<H2 id="also">See also</H2>
+There are more examples of how one might use <code class="sh">xapply</code> in
+<A href="../../sbin/hxmd/hxmd.html">the <code class="sh">hxmd</code> HTML document</A>
+and <A href="../../sbin/msrc/msrc.html">the <code class="sh">msrc</code> HTML document</A>.
+
+<HR>
+<PRE>$Id: xapply.html,v 3.19 2010/08/13 17:19:58 ksb Exp $
+</PRE>
+</BODY></HTML>

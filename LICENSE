@@ -1,0 +1,23 @@
+# $Id: LICENSE.wPRN,v 1.2 2004/12/06 15:17:53 ksb Exp $
+
+This package contains fragments of code released under Copyright from
+Purdue Research Foundation, West Lafayette, Indiana, 47907.
+
+The original Copyright allows for derived works, so long as we don't hold
+them responsible, misrepresent this code as solely our work, or distribute
+altered versions as the original.  See that Copyright notice in the file
+"local/lib/mkcmd/util_time.mc".
+
+The modifications I've made to this software are pervasive, no file in the
+package remains unaltered, as far as I know.
+
+Permission is granted to anyone to use, modify and distribute the modified
+software for any purpose, so long as you don't violate the original Purdue
+terms, or hold the authors (nor Purdue University) responsible for any
+consequences of the use of these modifications.
+
+To be safe you might include (in your license file) the first paragraph of
+this notice.  I feel Purdue deserves the credit, but I'm not a lawyer.
+
+--
+ksb (Kevin S Braunsdorf), ksb plus crn At spam.NPCGuild.org minus spam.

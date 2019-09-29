@@ -1,0 +1,342 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html><head>
+<title>Tech notes about xclate</title>
+<link rel="stylesheet" type="text/css" href="/msrc/css/code.css"/>
+</head><body>
+<H1 id="known">What you need to know to understand this document</H1>
+
+This document assumes you are quite familiar with the
+standard UNIX tools from section 1
+<code class="sh">date</code>,
+<code class="sh">sed</code>,
+<code class="sh">tr</code>,
+<code class="sh">cat</code>,
+and are very familiar with the shell itself,
+that is <code class="sh">sh</code>(1).
+<P>
+In addition you need a working understanding of the common I/O
+file descriptors, and how they are manipulated by the shell
+(<code class="param">stdin</code>,
+<code class="param">stdout</code>, <code class="param">stderr</code>).
+And you should be able to quote parameter lists using double-quotes or
+single-quotes -- and know when to use each.
+
+<h1>What is <code class="sh">xclate</code>?</h1>
+
+The <code class="sh">xclate</code> <a href="../wrapw/wrapper.html">wrapper</a>
+collates multiple output streams such that the output from each task
+is complete before any other's output begins.  This does <em>not</em> mean that
+the program's execution is sequenced -- just the output.  The tasks may
+run in parallel or even in reverse order, but the output is never mixed
+together.
+
+<p>
+Intermingled results from multiple parallel processes create confusion.
+For example the error output from "cat foo" and "make bar" mixed-up
+might look like:
+<blockquote class="file"><pre><code >make: cat: don't know how to make foo:  bar.  Stop
+No such file or directory
+</code></pre></blockquote>
+
+<p id="need">
+After working on large scale parallel processing for a time I
+noticed that the main restriction I had left was the serialization
+of output.  I had to write the output from all the processes to individual
+files, then <code class="sh">cat</code> those to assemble a report
+I could understand.  While all that was going on I couldn't even examine
+the output from the finished tasks.
+
+<P>
+I decided to code a solution that would show me the output from the
+finished tasks as soon as they terminated.  The best way I knew how
+to do it was with a wrapper.
+
+<H2 id="tactic">Building the wrapper</H2>
+
+Briefly a wrapper is a two-part program: a part that holds a socket
+open to service clients, and a part that services clients.  The difference
+between this and a typical "client/server" model is that there are usually
+many "servers" running on a host for different logins, programs, and
+functions all at the same time -- and there may by many clients connecting
+to each of those in parallel.
+
+<P>
+The through-put provided to one instance is not bound in any way to the
+actions of another (given sufficent resources).  For example peer wrappers
+to not share the same <code class="libc">listen</code>(2) queue, or the
+even the same socket options or accept filters.
+This reduces one bottle-neck in the
+client/server model, and removes some of the need for "well known ports".
+
+<P>
+To speed the implementation more we use local-domain (unix-domain) sockets.
+This removes the overhead of TCP/IP for communications, making inter-process
+comunications exactly as fast as a pipe.
+
+<P><!-- I had another idea... ZZZ ??? -->
+
+<H2>Using the wrapper</H2>
+
+The master instance of the wrapper and the client mode are almost always the
+same program, and <code class="sh">xclate</code> is no exception.
+Selecte the master instance with the <code class="opt">-m</code> option,
+the client mode is the default case.
+
+<P>
+The usage for a master instance of <code class="sh">xclate</code> is:
+<blockquote>
+xclate
+<code class="opt">-m</code>
+[<code class="opt">-dQrsv</code>]
+[<code class="param">-depth</code>]
+[<code class="opt">-H</code>&nbsp;<code class="param">hr</code>]
+[<code class="opt">-i</code>&nbsp;<code class="param">input</code>]
+[<code class="opt">-L</code>&nbsp;<code class="param">cap</code>]
+[<code class="opt">-N</code>&nbsp;<code class="param">notify</code>]
+[<code class="opt">-O</code>&nbsp;<code class="param">output</code>]
+[<code class="opt">-T</code>&nbsp;<code class="param">title</code>]
+[<code class="opt">-u</code>&nbsp;<code class="param">unix</code>]
+[<code class="opt">-W</code>&nbsp;<code class="param">widow</code>]
+[<code class="param">utility</code>]
+</blockquote>
+<P>
+That shows that the command "<code class="sh">xclate -m</code>" is a
+legal invokation of the program, and it is.  When you run that command
+a new shell is created which has access to the new master process's
+resources.  Here is an example showing the shell history number
+resets to 1 for the new shell, the process tree and the socket
+that that instance opened (which I found with the version output
+from <code class="sh">xclate</code>):
+<blockquote class="file"><pre><code >wrkstn /home/ksb 85  xclate -m
+wrkstn /home/ksb 1  ptree $$
+117   /usr/sbin/sshd
+  8758  sshd: ksb@ttyp2
+    8761  -ksh
+      99919 xclate -m
+        99920 ksh
+          99984 ptree 99920
+
+wrkstn /home/ksb 2  xclate -V
+xclate: $<!-- -->Id: xclate.m,v 2.53 2008/09/11 17:55:36 ksb ...
+xclate: environment prefix "xcl"
+xclate: environment tags: "link", "list", "d", "1"
+xclate: protocol version 0.7
+xclate: safe directory template: xclXXXXXX
+xclate:  1 /tmp/xcloDQ2vJ/1 [target]
+
+wrkstn /home/ksb 3  ls -lals /tmp/xcloDQ2vJ/1
+0 srwxr-xr-x  1 ksb  wheel  0 Sep 20 15:20 /tmp/xcloDQ2vJ/1=
+
+wrkstn /home/ksb 4  exit
+wrkstn /home/sac1/ksb 86  ...
+</code></pre></blockquote>
+
+<P>
+While an interactive shell is a possible <code class="param">utility</code>,
+it is probably not the best choice.
+It a lot easier to use in a script, and an interactive shell doesn't
+usually require the services on an <code class="sh">xclate</code>
+master instance.
+Usually the structure built for an <code class="sh">xclate</code> master
+instance is a script or a tool that knows about <code class="sh">xclate</code>.
+
+<P>
+But we will come back to the shell example to show some of
+the features off later.
+For the time being we need to know how to start a client program.
+The options for a client instance look like:
+<blockquote>
+xclate
+[<code class="opt">-Qsvw</code>]
+[<code class="opt">-IEDY</code>]
+[<code class="opt">-depth</code>]
+[<code class="opt">-H</code>&nbsp;<code class="param">hr</code>]
+[<code class="opt">-L</code>&nbsp;<code class="param">cap</code>]
+[<code class="opt">-T</code>&nbsp;<code class="param">title</code>]
+[<code class="opt">-u</code>&nbsp;<code class="param">unix</code>]
+[<code class="param">xid</code>]
+[<code class="param">client</code>]
+</blockquote>
+
+<P>
+There are 3 important points in this option specification:
+<DL>
+<DT>[<code class="param">xid</code>] [<code class="param">client</code>]
+<DD>
+Each client specifies two positional parameters: the <code class="param">xid</code> name and the <code class="param">client</code> process.
+It is all too common the forget the <code class="param">xid</code>, I
+do it all the time.
+<DT><em>it is not shown that master instance must enclose a client instance</em>
+<DD>
+A master instance must enclose a client instance, like any other wrapper.
+But unlike other wrappers the primary use-case is via
+<code class="sh">xapply</code>
+which knows how to create both the master instance and the client
+instances, see the
+<A href="../xapply/xapply.html">xapply HTML document</A>.
+<DT>[<code class="opt">-Qsvw</code>] [<code class="opt">-IEDY</code>]
+<DD>
+There are 2 different bundles of single letter switches.  This is
+meant to indicate that the second switches turn on other features
+inside the program, and may subtley change the behavior of the client.
+In effect providing any of <code class="opt">-I</code>,
+<code class="opt">-E</code>, <code class="opt">-D</code>, or
+<code class="opt">-Y</code> implies a major change in how
+<code class="sh">xclate</code> processes the client request.
+</DL>
+
+<p>
+It would be a lot of typing, but one could collate output with
+<code class="sh">xclate</code> from a command prompt.
+It is <em>much</em> more likely to be part of a shell script, or even
+designed into a large-scale parallel application.
+That's why it is
+an integral part of <code class="sh">xapply</code> and
+<code class="sh">hxmd</code>, see the
+<A href="../../sbin/hxmd/hxmd.html">hxmd HTML document</A>.
+
+<H2 id="useful">How useful is that?</H2>
+
+All this talk about collated output doesn't look like a
+super feature by itself.  To see where this would
+be helpful think about a large process tree, with many
+parallel workers, all of which might want access to a single
+output-stream.  For this example let's say the
+output goes to a interactive <code class="sh">less</code>.
+
+<p>
+How would we present the output to the reader?  Which task
+should output first (first started or first finished)?
+How shall we label the output "parts" so they will be  recognizable
+<em>sections</em> for the reader.
+We'd might also like to handle nested groupings (as chapters
+in a book, with sections in chapters, or even paragraphs in those sections).
+
+<p>
+Output which is not properly directed to a collated sections should
+be diverted to the end, or trapped someplace.  And it would be pretty
+neat if we could keep a running tally of the sections still open, or
+finished.
+
+<p>
+<code class="sh">Xclate</code> provides those features, and a few more.
+
+<H2 id="integrate">Integration with ksb tools</H2>
+
+Since I coded <code class="sh">xclate</code> it stands to reason that
+I'd use it.  Oh, and I <em>do</em>!
+
+<H3>With <code class="sh">xapply</code></H3>
+The key application that use this is
+<A href="/cgi-bin/manpage.cgi?xapply"><code class="sh">xapply</code></A>,
+which drives many parallel tasks, and
+might want the output from each task to be continuous.
+Another example would be a "make world" on a FreeBSD host.  If we could
+put a "|xclate $component" on the end of each major component we could
+make the output of the build a <strong>lot</strong> easier to read, while
+making it much more parallel.
+
+<p>
+In fact <code class="sh">xclate</code> must be installed before
+<code class="sh">xapply</code> is built.
+On a related note,
+<A href="../../sbin/hxmd/hxmd.html"><code class="sh">hxmd</code></A>
+uses options to <code class="sh">xclate</code> directly, so it won't run without
+<code class="sh">xclate</code> either.
+
+<p>
+The shell fragment below starts a collated stream over an
+<code class="sh">xapply</code> with 3 tasks in parallel.
+Each task stalls a bit between the output of a sequence of lines,
+for a total of about 6 seconds (1+2+1+2+0).  We ask for
+9 iterations ('first' ... 'last').
+That makes the whole <code class="sh">xapply</code> command take
+about 18 seconds (9*6 / 3),
+but the output <strong>is not intermixed</strong>.
+<blockquote class="file"><pre><code >$ time xclate -m xapply -P3 'for i in 1 2 1 2 0 ; \
+	 do date +"%1 %%c"; sleep $i; done |xclate %1' \
+		first t1 t2 t3 t4 t5 t6 t7 last
+... (output of the data line) ...
+   19.09s real     0.25s user     0.46s system
+</code></pre></blockquote>
+
+<p>
+The extra second overhead is the time for <code class="sh">xapply</code> to
+fork all the processes and build all the pipes,
+and also a small constant term due to code that compensates for
+a race condition in a <code class="libc">select</code>(2) loop.
+
+<p>
+A shorthand for this is:
+<blockquote class="file"><pre><code >$ time xapply <em class="new">-m</em> -P3 'for i in 1 2 1 2 0 ; \
+	do date +"%1 %%c"; sleep $i; done' \
+		first t1 t2 t3 t4 t5 t6 t7 last
+...
+   19.08s real     0.21s user     0.48s system
+</code></pre></blockquote>
+which almost completely hides the xclate usage from the script writer.
+That code is what makes <code class="sh">xapply</code> a wrapper: it
+wraps itself automatically in an <code class="sh">xclate</code>.
+
+<p>
+That shorthand does limit the command-line options which can be
+passed directly to <code class="sh">xclate</code>.
+For example to pass the '-T "start %x"'
+option to the xclate-filter we must leverage an environment variable,
+like this (see the
+<A href="/cgi-bin/manpage.cgi?xclate"><code class="sh">xclate manual page</code></A>
+under ENVIRONMENT):
+<blockquote class="file"><pre><code >$ XCLATE_1='-T "start %x"' ; export XCLATE_1
+$ time xapply <i>...</i>
+</code></pre></blockquote>
+
+<H3>With <code class="sh">hxmd</code> and <code class="sh">msrc</code></H3>
+
+Since <code class="sh">hxmd</code> uses <code class="sh">xapply</code> and always passes the
+<code class="opt">-m</code> switch down it also uses <code class="sh">xclate</code>.  The
+collated stream under <code class="sh">hxmd</code> is <em>really useful</em>, as
+<code class="sh">hxmd</code> output without collation is extremely jumbled.
+
+<p>
+This is such a benefit that there is no command-line option to
+turn off the use of xclate.  Now think about how much I like command-line
+options and wonder "What's gotten into him?"
+
+<p>
+The <code class="sh">msrc</code> remote build tool uses
+<code class="sh">hxmd</code> to build the wrapper machine it needs, so
+it uses <code class="sh">xclate</code> in
+exactly the same way as <code class="sh">hxmd</code>.
+
+<H3>With <code class="sh">ptbw</code></H3>
+
+The parallel token broker (<code class="sh">ptbw</code>) is used to limit the
+number of parallel tasks inside a collated stream, but not really used
+to produce collated output.
+But it has a subtle link to <code class="sh">xclate</code>, none the less.
+
+<p>
+Any <code class="sh">ptbw</code> instance nests its UNIX domain communications
+socket inside the tightest enclosing <code class="sh">xclate</code> directory.
+This is an attempt to reduce the load on the filesystem be reducing
+the number of meta updates for the creation and deletion of temporary
+directories.  Also see the <A href="../ptbw/ptbw.html">ptbw HTML document</A>.
+
+<h3>With <code class="sh">distrib</code></h3>
+
+Quite often calls to <code class="sh">distrib</code> were wrapped in an
+<code class="sh">xapply -m</code>, which is
+where <code class="sh">hxmd</code> came from.
+
+<p>
+<code class="sh">Hxmd</code> builds the whole <code class="sh">xapply</code>
+stack with detailed knowledge and intent.  It does a better job of constructing
+the stack than any shell programmed could by creating pipes that the
+shell cannot (easily) express.  Well, <code class="sh">ksh</code> can
+with a co-process.
+
+<hr>
+<pre>$Id: xclate.html,v 2.18 2010/08/13 17:18:29 ksb Exp $
+</pre>
+</body>
+</html>

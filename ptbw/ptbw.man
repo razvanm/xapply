@@ -1,0 +1,468 @@
+.\" $Id: ptbw.man,v 1.34 2010/07/08 14:39:37 ksb Exp $
+.\" by KS Braunsdorf
+.\" $Compile: Display%h
+.\" $Display: ${groff-groff} -Tascii -man %f |${PAGER:-less}
+.\" $Display(*): ${groff-groff} -T%s -man %f
+.\" $Install: %b -mDeinstall %o %f && cp %f $DESTDIR/usr/local/man/man1/ptbw.1
+.\" $Deinstall: ${rm-rm} -f $DESTDIR/usr/local/man/[cm]a[nt]1/ptbw.1*
+.TH PTBW 1L LOCAL
+.SH NAME
+.ds PN "ptbw
+\*(PN \- parallel token broker wrapper
+.\" phantom toll booth warden
+.\" pull ticket because we...
+.\" produce ticket batch with cmd
+.\" provide terrain-binding worksheet
+.SH SYNOPSIS
+\fI\*(PN\fP \-\fBm\fP [\-\fBdQ\fP] [\-\fBJ\fP\~\fIjobs\fP] [\-\fBN\fP\~\fIpath\fP] [\-\fBR\fP\~\fIreq\fP] [\-\fBt\fP\~\fItags\fP] [\fIutility\fP]
+.br
+\fI\*(PN\fP [\-\fBAqQ\fP] [\-\fIdepth\fP] [\-\fBR\fP\~\fIreq\fP] [\-\fBt\fP\~\fItags\fP] [\fIclient\fP]
+.br
+\fI\*(PN\fP \-\fBh\fP
+.br
+\fI\*(PN\fP \-\fBV\fP
+.br
+
+.sp
+.SH DESCRIPTION
+Wrapping an application in \fI\*(PN\fP allows
+multiple cooperating processes to queue for
+an available resource (CPU, modem, device, or what have you).
+The \fIutility\fP program inherits an environment which allows
+\fI\*(PN\fP to manage a resource pool for descendent clients.
+.PP
+Parallel processing is a key feature of UNIX shell commands.
+Common utilities such as \fImake\fP, \fIbatch\fP/\fIat\fP,
+\fIpr\fP, and \fIxapply\fP,
+as well as network and system daemons, and shell pipelines
+all use the timesharing features of UNIX.
+Based on the speed of the underlying hardware,
+process timing, and unrelated resource utilization
+the results of the interactions between
+generations of parallel processing vary widely.
+.PP
+Static allocation of resources makes this issue worse.
+As resource demand in the system eases it should be possible to
+migrate resources to more intensive tasks.
+Options like \fImake\fP's \-\fBj\fP do not adjust to the
+over-all demands on the system.
+And work-arounds (like uucp's lock files) only limit through-put,
+they never dynamically adjust to allocate more resources.
+.PP
+For example a \fImake\fP with a large \-\fBj\fP \fImax_jobs\fP
+might run a recipe that starts a recursive \fImake\fP with a very large
+\fImax_jobs\fP.
+When that task usually only finds up-to-date dependencies this will go
+unnoticed but,
+in a rare case must run a large update,
+it may consume massive CPU.
+The degradation to overall system though-put, caused by
+thrashing the virtual memory system,
+may unreasonably impact the host.
+This can be amplified with \fIxapply\fP's \-\fBP\fP option interacting
+recursively with \fImake\fP and \fIxapply\fP itself.
+It is almost a given with large \fIhxmd\fP instances.
+.PP
+With \fI\*(PN\fP it is possible for very large process trees to
+cooperate to maximize system though-put, without complexity enough
+to make the system too costly to maintain.
+This is clearly important for systems which support interactive transactions
+as well a resource constrained applications.
+.PP
+Processors like \fI\*(PN\fP are becoming more relevant as
+hosts with more CPUs and threads become available: code back-ported
+to lesser nodes may simply not run at all without clever resource
+management.
+
+.SH OPTIONS
+If the program is called as \fI\*(PN\fP then no options are forced.
+The environment variable $\fBPTBW\fP is consulted for options,
+see ENVIRONMENT below.
+.TP
+\fB\-\fIdepth\fP
+Specify resource control from an outer copy of \fI\*(PN\fP.
+This may allow some more complex resource management, but is
+usually \fIpoor form\fP, as it defeats a limit imposed by the
+directly enclosing instance of \fI\*(PN\fP \-\fBm\fP.
+.TP
+\fB\-A\fP
+Append the allocated resource to the \fIclient\fP argument vector.
+This may allow some shells direct access to the arguments under
+their \-\fBc\fP option.  See CLIENT below.
+.TP
+\fB\-d\fP
+Use this option start managers which are detached from the linked environment.
+The normal operation of \fI\*(PN\fP requires each master process
+to publish the name of the controlling socket in the environment,
+so descendant processes may connect to allocate resources.
+When the name of the manager's socket is passed by an out-of-band
+protocol it may be undesirable to include it in the standard chain.
+.TP
+\fB\-h\fP
+Print a short help message.
+.TP
+\fB\-J\fP \fIjobs\fP
+Set the minimum number of clients expected to run in parallel.
+This also specifies, in combination with \-\fBR\fP,
+the number of \fItokens\fP created when no \fItags\fP
+data is provided.
+.TP
+\fB\-m\fP
+Manage resources for descendant processes.
+The \fIutility\fP is executed as given (not through any shell indirection)
+as \fInice\fP or \fItime\fP would run their \fIutility\fP.
+See MANAGER below.
+.TP
+\fB\-N\fP \fIpath\fP
+Bind the master to a specific name on the filesystem.
+This is useful when an unrelated process must connect to the service.
+Absolute paths are taken as-is, a relative \fIpath\fP is bound in
+a temporary directory.
+.TP
+\fB\-q\fP
+This toggle removes \fI\*(PN\fP complaints about constrained resources,
+for example when an explicit \fItags\fP file is too short to
+support the \fIreq\fP or \fIjobs\fP parameters.
+.TP
+\fB\-Q\fP
+When the enclosing diversion is running with no child process (it
+was started with a colon (:) as the \fIutility\fP, this lets that
+instance know it is time to stop.  The enclosing instance waits for
+all the current clients to finish before termination.  It might be
+a bug that new clients are also accepted, but that's not clear.
+.TP
+\fB\-R\fP \fIreq\fP
+Resources are allocated in groups of \fIreq\fP members, at most.
+When a \fItags\fP file is provided, this sanity checks the count of
+the of resource \fItags\fP provided, it may provide more
+than \fIreq\fP requires, but never less.
+.TP
+\fB\-t\fP \fItags\fP
+Specify the file which contains controlled resource tags,
+which is always opened read-only.
+Each line in this file is taken as a managed resource, unless it
+starts with an octothorpe (aka hash, "#") in which case it is
+a comment.
+Blank lines are taken as empty resources (the empty string).
+If the file requires any clean-up filtering before use it is up
+to the calling process to pre-process it.
+The special \fItags\fP value dash (\*(lq-\*(rq) instructs \fI\*(PN\fP
+to gather tokens from an enclosing \fI\*(PN\fP; which one may be
+controlled with \-\fIdepth\fP.
+.sp
+Without the specification of \fItags\fP the names of the tokens are
+the integers from zero to \fIreq\fP*\fIjobs\fP-1.
+.TP
+\fB\-V\fP
+Show only version information, and a trace of any enclosing instances.
+
+.SH ENVIRONMENT
+.TP
+$\fBxcl_link\fP, $\fBxcl_\fP\fIN\fP
+Use to find the directory any enclosing \fIxclate\fP process has
+created.  A manager instance may use this same directory to hold
+the client UNIX domain socket.
+.TP
+$\fBptbw_link\fP, $\fBptbw_\fP\fIN\fP
+Parallel to \fIxclate\fP's use.  These variable keep track of the
+full path name to the enclosing manager's client socket.  We can reuse
+the tightest enclosing directory, if any.
+.TP
+$\fBptbw_d\fP
+Also parallel to \fIxclate\fP's use under \-\fBd\fP.  This variable
+holds the name of unix domain socket for the tightest enclosing manager
+process which was started with \-\fBd\fP in effect.
+.TP
+$\fBptbw_list\fP
+The list of resources allocated by the tightest enclosing \fI\*(PN\fP
+for a client, separated by newlines.  By default each client instance
+overwrites this variable, thus descendant processes will not see
+values allocated to outer levels.
+.TP
+$\fBPTBW\fP, $\fBPTBW_1\fP, $\fBPTBW_2\fP, \fI...\fP
+After reading command line options from variable $\fBPTBW\fP,
+any master (\fB\-m\fP) process removes it from the environment.
+It then installs the variable $\fBPTBW\fP_\fInesting\fP in its place,
+if it is present in the environment.  This mocks the behavior of
+\fIxclate\fP, for similar reasons.
+For another way to leaver this see \fIxapply\fP's \-\fBe\fP option.
+
+.SH MANAGER
+A manager instance releases
+any open \fIstdin\fP or \fIstdout\fP descriptors, as not to hold
+a pipe open, but maintains a descriptor on \fIstderr\fP.
+The manager also \fIchdir\fPs out of the current working directory
+(after starting the inferior process).
+.PP
+An empty \fIutility\fP is a synonym for $SHELL, when set, or
+the Bourne shell by default.  The special \fIutility\fP name \fB:\fP
+(a single colon) with no parameters is taken as "sleep forever",
+since \fIsleep\fP(1) doesn't have such an option.  See \fB\-Q\fP above.
+.PP
+When \-\fBR\fP is specified in master mode and \-\fBt\fP is given
+the special \fItags\fP name dash (\*(lq-\*(rq) \fIreq\fP
+is taken as the number of tokens to request from the
+enclosing \fI\*(PN\fP.
+If it is not possible to allocate \fIreq\fP tokens the instance fails.
+If there are more tokens available it may
+add additional multiples of \fIreq\fP tokens, one for each of \fIjobs\fP.
+.PP
+The default value for \-\fBJ\fP is a function of the number of
+CPUs detected on the system, and the value of \fIreq\fP.
+See \-\fBV\fP's version output, or the default tableau output.
+
+.SH CLIENT
+Without \-\fBm\fP the default client is similar to \fIwho\fP or maybe
+\fInetstat\fP \-\fBi\fP.
+Listing the index, locking process, name, and maybe some other
+details (which may change in the next release) for each \fItoken\fP.
+The name dash (\*(lq-\*(rq) is an explicit way to ask for this client.
+.PP
+When a \fIclient\fP command is specified,
+the environment variable $\fPptbw_list\fP is
+set before the command is executed to the list of allocated resources.
+These resources are released and reallocated to another client when
+the child process exits.
+.PP
+When \-\fBR\fP is specified, in client mode, \fI\*(PN\fP
+requests \fIreq\fP tokens for the \fIclient\fP environment.
+These are separated by literal newlines in $ptbw_list.
+Note that requesting zero resources (\-\fBR\fP0) removes $\fBptbw_list\fP
+from the environment, as one might expect
+(since the empty string is a valid resource).
+.PP
+As an alternate interface, under \-\fBA\fP, each of the \fIreq\fP
+tokens maybe appended to the argument vector for the \fIclient\fP
+command.
+These then become available to the client process as elements of
+the \fIargv\fP array, see \fIexecve\fP(2).
+
+.SH EXAMPLES
+.TP
+.nf
+\fI\*(PN\fP \-\fBV\fP
+.fi
+The standard version information.
+.TP
+.nf
+\fI\*(PN\fP \-\fBm\fP \fI\*(PN\fP \-\fBm\fP \fI\*(PN\fP \-\fBV\fP
+.fi
+The standard version information, plus an example trace of 2 nested
+wrappers (the last 2 lines).
+.TP
+.nf
+\fI\*(PN\fP \-\fBm\fP \fI\*(PN\fP
+.fi
+Output only the default tableau for the current host.
+.TP
+.nf
+\fI\*(PN\fP \-\fBm\fP \-\fBt\fP \fIlist.cl\fP \fI\*(PN\fP
+.fi
+Output the tableau for the current file \fIlist.cl\fP.
+.TP
+.nf
+\fIxapply\fP \-J8 \fI...\fP
+.fi
+By forcing a \-\fBJ\fP to \fIxapply\fP this sets a default of
+\*(lq\-\fBt\fP \-\*(rq, see below.
+.TP
+.nf
+\fI\*(PN\fP \-\fBm\fP \-\fBt\fP \fIlist.cl\fP \fIxapply\fP \-t \- \fI...\fP
+.fi
+Wrap an xapply in a \fI\*(PN\fP master, draw tokens from that master.
+.TP
+.nf
+\fIxapply\fP \-t \fIlist.cl\fP \fI...\fP
+.fi
+A shorthand for the previous example.
+The default \-\fBJ\fP value is the one specified for \-\fBP\fP, not
+the (larger) system default.
+.TP
+.nf
+\fI\*(PN\fP \-\fBm\fP \-\fBt\fP \fIlist.cl\fP \fI\*(PN\fP $SHELL \-c '\fImycmd\fP'
+.fi
+Start a sub-shell wrapped in a \fI\*(PN\fP.  From this shell the
+\fImycmd\fP has access to an initial resource in "$ptbw_list", and may
+garner others via the client interface.
+.TP
+.nf
+\fI\*(PN\fP \-\fBm\fP \-\fBt\fP \fIlist.cl\fP \fImyscript\fP
+.fi
+Start a shell script wrapped in a \fI\*(PN\fP.  The \fImyscript\fP
+process has access to all resources via the client interface.
+.TP
+.nf
+\fI\*(PN\fP \-mJ3 \-R2 sh \-c 'for i in `jot -c 26 97`; do \fI\*(PN\fP \-AR2 echo $i; done'
+.fi
+.\" for i in $(perl -e 'print map{"$_ "}"a".."z";') ; do
+Distribute 2 tokens at a time from a list of 3 pairs, to each of 26 iterations
+(once for each letter a through z).
+Each iteration just \fIecho\fPs the data from
+loop (the letter) and from \fI\*(PN\fP (2 digits).
+.TP
+.nf
+\fI\*(PN\fP \-mJ3 \-R2 xapply \-P3 '\fI\*(PN\fP \-R2 echo %* %t*' a b c\fI...\fP z
+.fi
+Do about the same thing as the \fBfor\fP example, adding the \fB\-P3\fP after
+the \fBxapply\fP makes this way more useful (in the real world).
+.TP
+.nf
+xapply \-J3 \-R2 \-P3 'echo %* %t*' a b c\fI...\fP z
+.fi
+Major Shorthand for the previous example.
+.TP
+.nf
+\fI\*(PN\fP \-\fBAR\fP 3 ksh \-c 'echo $0 $1 $2 $3' _
+.fi
+A trivial example of \fIksh\fP's argument processing applied to
+the appended resource tokens.  The underscore (\*(lq_\*(rq) is
+bound to \fB$0\fP, the first resource is bound to \fB$1\fP,
+the second to \fB$2\fP (and so on).
+We canonically use the underscore to
+make the usage more natural in the shell code.
+.TP
+.nf
+\fI\*(PN\fP \-\fBA\fP \-R1 env
+.fi
+A brutal abuse of the program, a selected resource is taken as executable
+file, then run via \fIenv\fP's penchant for indirection.  This is also
+called "Russian Roulette," for a good reason.
+.\" This might be useful to you, in which case I'd ask someone for
+.\" a second opinion, or a real gun.
+.TP
+.nf
+\fI\*(PN\fP \-\fBm\fP \-\fBN\fP /var/run/toker \-t $HOME/lib/all.cl \fI...\fP
+.fi
+Start a resource service attached to \fB/var/run/toker\fP, the
+target command (\fI...\fP) must not exit until all the clients of
+the triple-dot service are done.
+.TP
+.nf
+\fI\*(PN\fP \-\fBmd\fP \-\fBN\fP /var/run/toker \-t $HOME/lib/all.cl \fI...\fP
+.fi
+Same as above, but do not include the wrapper listening on
+\fB/var/run/toker\fP in the global nesting chain.
+.TP
+.nf
+\fI\*(PN\fP \-\fBm\fP \-\fBN\fP /var/run/toker \-t $HOME/lib/all.cl \fB:\fP
+.fi
+As above, but don't really run a \fIutility\fP, just process client request.
+.TP
+.nf
+\fI\*(PN\fP \-\fBt\fP /var/run/toker \fImytask\fP
+.fi
+Select a token from the \fB/var/run/toker\fP pool to process a
+task (\fImytask\fP), which might read \fB$ptbw_list\fP to access the
+resource name.
+.TP
+.nf
+\fI\*(PN\fP \-\fBA\fP \-\fBt\fP /var/run/toker \fImytask\fP
+.fi
+As above, but access the selected resource as \fB$1\fP in \fImytask\fP.
+.TP
+.nf
+\fI\*(PN\fP \-\fBAR\fP3 perl \-e '\fI...\fP$ARGV[0]\fP\fI...\fP'
+.fi
+Run an in-line \fIperl\fP fragment with 3 resource values in \fI@ARGV\fP
+(since the \-\fBA\fP appended them to the \fIclient\fP argument vector).
+.TP
+.nf
+\fI\*(PN\fP \-R1 ksh \-c "echo \e$ptbw_list && read sentinel" |&
+.fi
+This starts a co-process that holds a token.  The parent shell might
+read the token with
+.nf
+	read \-p MYTOK
+.fi
+then release the token with
+.nf
+	print \-p quit
+.fi
+Other variants of this co-process template are also useful,
+but be warned that deadlock and synchronization issues abound.
+.TP
+.nf
+\fI\*(PN\fP \-\fBAR\fP 4 sh \-c 'exec make \-j $# \fI...\fP'
+.fi
+This is a prototype interface to allow a \fBmake\fP process to
+wait for 4 resources before it starts.  That doesn't release them
+as it is done with them, but we can't solve all the worlds problems
+with the first steak-in-the-ground.  Note that the \*(lq4\*(rq count
+only appears in the command once: that might be important later.
+.\" Or we're going to have to mess with make to let it free resources yucko
+.TP
+.nf
+NR=$(ptbw |sed -n -e '$s/[ ^I]*\e([0-9][0-9]*\e)[ ^I].*/\e1/p')
+.fi
+.TP
+.nf
+NR=$(expr $NR + 1)
+.fi
+Compute the maximum number of resources in the current diversion.
+(Note that the \fB^I\fP above represents a literal tab character.)
+.TP
+.nf
+ptbw \-R $NR \-A xapply 'echo "%q1"'
+.fi
+With the number of record variable above in-scope
+this command attempts to ouput the tableau, of couse it must compete
+for the whole list with any sibling processes.
+This may be useful to sanity check a run-time environment, even
+more so when \fIecho\fP is replaced by a more useful check function.
+
+.SH "EASTER EGGS"
+As a bonus the \fItags\fP file may be the name of a \fI\*(PN\fP socket,
+which obviates the need for synthesizing a fake environment to attach
+to an explicitly \fIpath\fP'd resource manager.
+This is true for \fIxapply\fP's \-\fBt\fP option as well.
+.PP
+If the program is called by another name (other than \*(lqptbw\*(rq)
+then the basename of that name is the name given to any manager or
+client process.  This allows a default zero configuration file to be
+passed through \*(PN from \fImsrc\fP to \fIhxmd\fP.
+." With ln \-s it also allows one to call any program with a different argv[0].
+.PP
+In the future it may be possible to add function (other than "iota")
+to the synthesizer list.
+.PP
+Other programs may act as resource brokers.  This wrapper is the prototype
+for a larger effort to make more effective use of massively parallel
+UNIX nodes and clusters.
+
+.SH BUGS
+As with \fIxclate\fP, it is unclear to the novice how to
+use this at all -- let alone how much power the spell controls.
+.PP
+The process id (pid) registered as the owner of a resource is not
+always reliable enough to use to signal a process.  The race condition
+between reading the pid and sending the signal, combined with several
+ways to fake the pid that \fI\*(PN\fP displays all lead to a bad result.
+Code automation to signal a process based on \fI\*(PN\fP's recollections
+\fBonly after\fP some other independent verification process.
+.PP
+The specification of \-\fBR\fP in master mode is used as a
+prediction of the maximum \fIreq\fP provided for each client.
+When this prediction is wrong tokens may be allocated and left unused,
+or too few may be allocated for any client to actually start.
+.PP
+Be warned, there are dangerous magics in more advanced usages.
+.PP
+We don't quite `eat our own dog food' as well as we might: we send
+resource names in a variable separated with newlines, but we can't
+receive such a variable (directly) as a list of resources to manage.
+Some process must put them into a file, or a FIFO.
+.PP
+The outer-most environment in \fI\*(PN\fP started at zero (viz. $ptbw_link=0),
+in previous versions of \fI\*(PN\fP.  This was not paralell to
+\fIxclate\fP so we now start at one.  In previous versions a \fItags\fP
+file didn't recognize comments, now it does.
+
+.SH AUTHOR
+KS Braunsdorf
+.br
+NonPlayer Character Guild
+.br
+booth swirl ksb dot npcguild dot org
+
+.SH "SEE ALSO"
+make(1), xapply(1), sh(1), ls(1), ifconfig(8), hxmd(8), perl(1), execve(2)
