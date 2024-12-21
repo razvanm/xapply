@@ -14,7 +14,10 @@ cc_binary(
         "-DLINUX",
         "-DHOSTOS=160400",
         "-D_GNU_SOURCE",
+        "-Wno-deprecated-non-prototype",
         "-Wno-expansion-to-defined",
+        "-Wno-implicit-int",
         "-Wno-incompatible-pointer-types",
+        "-Wno-unused-but-set-variable"
     ],
 )

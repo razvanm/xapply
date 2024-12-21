@@ -16,6 +16,7 @@ cc_binary(
         "-DLINUX",
         "-DHOSTOS=160400",
         "-DNEED_SETENV=0",
+        "-Wno-deprecated-non-prototype",
         "-Wno-expansion-to-defined",
         "-Wno-tautological-constant-out-of-range-compare",
     ],
